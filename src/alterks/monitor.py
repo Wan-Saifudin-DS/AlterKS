@@ -378,41 +378,44 @@ def run_monitor(
 
     previous_keys: Set[Tuple[str, str, str]] = set()
 
-    while True:
-        console.print("[bold]AlterKS monitor: scanning environment…[/bold]")
-        timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        while True:
+            console.print("[bold]AlterKS monitor: scanning environment…[/bold]")
+            timestamp = datetime.now(timezone.utc).isoformat()
 
-        try:
-            results = scanner.scan_environment()
-        except (OSError, httpx.HTTPError, OSVError) as exc:
-            logger.error("Monitor scan failed: %s", exc)
-            console.print(f"[red]Scan failed: {exc}[/red]")
+            try:
+                results = scanner.scan_environment()
+            except (OSError, httpx.HTTPError, OSVError) as exc:
+                logger.error("Monitor scan failed: %s", exc)
+                console.print(f"[red]Scan failed: {exc}[/red]")
+                if once:
+                    return
+                sleep(interval)
+                continue
+
+            # Detect newly disclosed issues
+            new_issues = diff_issues(results, previous_keys)
+            previous_keys = collect_keys(results)
+
+            # --- Notification channels ---
+
+            # 1. stderr log (always active)
+            notify_stderr(results, new_issues, console)
+
+            # 2. JSON file (if configured)
+            if json_output is not None:
+                report = _build_report(results, new_issues, timestamp)
+                notify_json_file(report, json_output)
+
+            # 3. Webhook (if configured)
+            if webhook_url is not None:
+                report = _build_report(results, new_issues, timestamp)
+                notify_webhook(report, webhook_url, webhook_secret=effective_secret)
+
             if once:
                 return
+
+            console.print(f"Next scan in {interval}s…", style="dim")
             sleep(interval)
-            continue
-
-        # Detect newly disclosed issues
-        new_issues = diff_issues(results, previous_keys)
-        previous_keys = collect_keys(results)
-
-        # --- Notification channels ---
-
-        # 1. stderr log (always active)
-        notify_stderr(results, new_issues, console)
-
-        # 2. JSON file (if configured)
-        if json_output is not None:
-            report = _build_report(results, new_issues, timestamp)
-            notify_json_file(report, json_output)
-
-        # 3. Webhook (if configured)
-        if webhook_url is not None:
-            report = _build_report(results, new_issues, timestamp)
-            notify_webhook(report, webhook_url, webhook_secret=effective_secret)
-
-        if once:
-            return
-
-        console.print(f"Next scan in {interval}s…", style="dim")
-        sleep(interval)
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Monitor stopped by user.[/bold yellow]")

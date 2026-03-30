@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.19 — Usability Fix
+
+- **Fixed**: `alterks monitor` termination producing an unhandled Python traceback instead of clean output. `KeyboardInterrupt` (Ctrl+C) is now caught gracefully, printing a "Monitor stopped by user" message and exiting cleanly.
+
 ### v0.1.18 — Design Fix
 
 - **Fixed**: UNKNOWN severity vulnerabilities defaulting to ALLOW (design gap). Vulnerabilities with unresolved severity now default to `alert` instead of silently passing. The `unknown` severity mapping is fully configurable in `pyproject.toml` under `[tool.alterks]` — users can override to `block`, `quarantine`, or `allow`.

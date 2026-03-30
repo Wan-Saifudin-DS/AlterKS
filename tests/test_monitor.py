@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from typing import List, Set, Tuple
@@ -588,15 +589,14 @@ class TestRunMonitor:
 
         console = Console(file=None, stderr=True, force_terminal=False)
 
-        with pytest.raises(KeyboardInterrupt):
-            run_monitor(
-                config=AlterKSConfig(),
-                interval=60,
-                once=False,
-                console=console,
-                scanner=scanner,
-                _sleep_fn=fake_sleep,
-            )
+        run_monitor(
+            config=AlterKSConfig(),
+            interval=60,
+            once=False,
+            console=console,
+            scanner=scanner,
+            _sleep_fn=fake_sleep,
+        )
 
         assert scanner.scan_environment.call_count >= 2
         assert sleep_calls[0] == 60
@@ -631,16 +631,15 @@ class TestRunMonitor:
 
         console = Console(file=None, stderr=True, force_terminal=False)
 
-        with pytest.raises(KeyboardInterrupt):
-            run_monitor(
-                config=AlterKSConfig(),
-                interval=300,
-                once=False,
-                console=console,
-                scanner=scanner,
-                json_output=output,
-                _sleep_fn=fake_sleep,
-            )
+        run_monitor(
+            config=AlterKSConfig(),
+            interval=300,
+            once=False,
+            console=console,
+            scanner=scanner,
+            json_output=output,
+            _sleep_fn=fake_sleep,
+        )
 
         lines = output.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
@@ -674,15 +673,14 @@ class TestRunMonitor:
 
         console = Console(file=None, stderr=True, force_terminal=False)
 
-        with pytest.raises(KeyboardInterrupt):
-            run_monitor(
-                config=AlterKSConfig(),
-                interval=10,
-                once=False,
-                console=console,
-                scanner=scanner,
-                _sleep_fn=fake_sleep,
-            )
+        run_monitor(
+            config=AlterKSConfig(),
+            interval=10,
+            once=False,
+            console=console,
+            scanner=scanner,
+            _sleep_fn=fake_sleep,
+        )
 
         assert scanner.scan_environment.call_count >= 2
 
@@ -702,3 +700,27 @@ class TestRunMonitor:
         )
 
         scanner.scan_environment.assert_called_once()
+
+    def test_keyboard_interrupt_graceful_shutdown(self):
+        """KeyboardInterrupt should be caught and produce a clean message."""
+        scanner = MagicMock()
+        scanner.scan_environment.return_value = [_make_result("ok", "1.0")]
+
+        def fake_sleep(seconds):
+            raise KeyboardInterrupt
+
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=False)
+
+        # Should NOT raise
+        run_monitor(
+            config=AlterKSConfig(),
+            interval=10,
+            once=False,
+            console=console,
+            scanner=scanner,
+            _sleep_fn=fake_sleep,
+        )
+
+        output = buf.getvalue()
+        assert "Monitor stopped by user" in output
