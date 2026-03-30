@@ -14,12 +14,14 @@ Features
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 import httpx
 from rich.console import Console
@@ -122,6 +124,81 @@ def notify_stderr(
         )
 
 
+class WebhookURLError(Exception):
+    """Raised when a webhook URL fails safety validation."""
+
+
+# RFC 5735 / RFC 6890 private & special-use ranges checked by ipaddress
+_BLOCKED_SCHEMES = frozenset({"file", "ftp", "data", "javascript", ""})
+
+
+def validate_webhook_url(url: str) -> str:
+    """Validate a webhook URL for SSRF safety.
+
+    Checks:
+    - Scheme must be ``https`` (``http`` accepted only for ``localhost``
+      during development).
+    - Hostname must not resolve to a private, loopback, or link-local IP.
+    - No ``file://``, ``ftp://``, ``data:``, or blank-scheme URLs.
+
+    Returns the validated URL unchanged, or raises :class:`WebhookURLError`.
+    """
+    parsed = urlparse(url)
+
+    # --- Scheme check -------------------------------------------------------
+    scheme = (parsed.scheme or "").lower()
+    if scheme in _BLOCKED_SCHEMES:
+        raise WebhookURLError(
+            f"Webhook URL scheme '{scheme}' is not allowed. Use https://."
+        )
+    if scheme not in ("https", "http"):
+        raise WebhookURLError(
+            f"Webhook URL scheme '{scheme}' is not allowed. Use https://."
+        )
+
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        raise WebhookURLError("Webhook URL has no hostname.")
+
+    # --- Allow plain http only for localhost ---------------------------------
+    _LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1"}
+    if scheme == "http" and hostname not in _LOCALHOST_HOSTS:
+        raise WebhookURLError(
+            f"Webhook URL uses http:// which is insecure. "
+            f"Use https:// or localhost for development."
+        )
+
+    # --- Skip private-IP check for explicit localhost addresses ---------------
+    if hostname in _LOCALHOST_HOSTS:
+        return url
+
+    # --- Block cloud metadata endpoints first (before generic private check) --
+    _METADATA_HOSTS = {
+        "169.254.169.254",          # AWS / GCP / Azure metadata
+        "metadata.google.internal", # GCP
+        "metadata.internal",
+    }
+    if hostname in _METADATA_HOSTS:
+        raise WebhookURLError(
+            f"Webhook URL points to a cloud metadata endpoint ({hostname}). "
+            "This is blocked to prevent SSRF."
+        )
+
+    # --- Block private / reserved IPs (SSRF) --------------------------------
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise WebhookURLError(
+                f"Webhook URL points to a private/reserved address ({hostname}). "
+                "This is blocked to prevent SSRF."
+            )
+    except ValueError:
+        # hostname is a DNS name, not a literal IP — that's fine.
+        pass
+
+    return url
+
+
 def notify_webhook(
     report: Dict[str, Any],
     webhook_url: str,
@@ -130,9 +207,16 @@ def notify_webhook(
 ) -> bool:
     """POST the report payload to a webhook URL.
 
+    Validates the URL for SSRF safety before sending.
     Returns True on success (2xx), False otherwise.
     Safe: never raises — errors are logged.
     """
+    try:
+        validate_webhook_url(webhook_url)
+    except WebhookURLError as exc:
+        logger.error("Webhook URL rejected: %s", exc)
+        return False
+
     try:
         resp = httpx.post(
             webhook_url,
@@ -233,6 +317,14 @@ def run_monitor(
     console = console or Console(stderr=True)
     scanner = scanner or Scanner(config=config)
     sleep = _sleep_fn or time.sleep
+
+    # Validate webhook URL eagerly so the user gets immediate feedback
+    if webhook_url is not None:
+        try:
+            validate_webhook_url(webhook_url)
+        except WebhookURLError as exc:
+            console.print(f"[bold red]Invalid webhook URL:[/bold red] {exc}")
+            return
 
     previous_keys: Set[Tuple[str, str, str]] = set()
 

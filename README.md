@@ -280,6 +280,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.4 — Security Fix
+
+- **Fixed**: Webhook URL validation to prevent SSRF attacks (OWASP A10:2021 — SSRF). Rejects private/reserved IPs, cloud metadata endpoints, non-HTTPS URLs (except localhost), and dangerous schemes.
+
 ### v0.1.3 — Security Fix
 
 - **Fixed**: Quarantine release now re-scans the package before installing into the main environment (OWASP A04:2021 — Insecure Design). If the package is still flagged, release is blocked unless `--force` is used.

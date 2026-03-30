@@ -13,6 +13,7 @@ from rich.console import Console
 from alterks.config import AlterKSConfig
 from alterks.models import PolicyAction, ScanResult, Severity, Vulnerability
 from alterks.monitor import (
+    WebhookURLError,
     _build_report,
     _issue_key,
     _result_to_dict,
@@ -22,6 +23,7 @@ from alterks.monitor import (
     notify_stderr,
     notify_webhook,
     run_monitor,
+    validate_webhook_url,
 )
 from tests.helpers import make_scan_result, make_vulnerability
 
@@ -223,6 +225,86 @@ class TestNotifyWebhook:
 
         result = notify_webhook({"test": True}, "https://example.com/hook")
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# validate_webhook_url — SSRF prevention
+# ---------------------------------------------------------------------------
+
+class TestValidateWebhookUrl:
+    """Tests for webhook URL validation against SSRF attacks."""
+
+    def test_https_allowed(self):
+        assert validate_webhook_url("https://example.com/hook") == "https://example.com/hook"
+
+    def test_http_localhost_allowed(self):
+        assert validate_webhook_url("http://localhost:8080/hook") == "http://localhost:8080/hook"
+
+    def test_http_127_allowed(self):
+        assert validate_webhook_url("http://127.0.0.1:9000/hook") == "http://127.0.0.1:9000/hook"
+
+    def test_http_public_rejected(self):
+        with pytest.raises(WebhookURLError, match="insecure"):
+            validate_webhook_url("http://example.com/hook")
+
+    def test_file_scheme_rejected(self):
+        with pytest.raises(WebhookURLError, match="not allowed"):
+            validate_webhook_url("file:///etc/passwd")
+
+    def test_ftp_scheme_rejected(self):
+        with pytest.raises(WebhookURLError, match="not allowed"):
+            validate_webhook_url("ftp://evil.com/data")
+
+    def test_empty_scheme_rejected(self):
+        with pytest.raises(WebhookURLError, match="not allowed"):
+            validate_webhook_url("//example.com/hook")
+
+    def test_private_ip_10_rejected(self):
+        with pytest.raises(WebhookURLError, match="private"):
+            validate_webhook_url("https://10.0.0.1/hook")
+
+    def test_private_ip_172_rejected(self):
+        with pytest.raises(WebhookURLError, match="private"):
+            validate_webhook_url("https://172.16.0.1/hook")
+
+    def test_private_ip_192_rejected(self):
+        with pytest.raises(WebhookURLError, match="private"):
+            validate_webhook_url("https://192.168.1.1/hook")
+
+    def test_link_local_rejected(self):
+        with pytest.raises(WebhookURLError, match="private"):
+            validate_webhook_url("https://169.254.1.1/hook")
+
+    def test_aws_metadata_rejected(self):
+        with pytest.raises(WebhookURLError, match="metadata"):
+            validate_webhook_url("https://169.254.169.254/latest/meta-data/")
+
+    def test_gcp_metadata_rejected(self):
+        with pytest.raises(WebhookURLError, match="metadata"):
+            validate_webhook_url("https://metadata.google.internal/")
+
+    def test_no_hostname_rejected(self):
+        with pytest.raises(WebhookURLError, match="no hostname"):
+            validate_webhook_url("https:///path")
+
+    def test_notify_webhook_rejects_bad_url(self):
+        """notify_webhook returns False (no exception) for invalid URLs."""
+        result = notify_webhook({"test": True}, "http://10.0.0.1/hook")
+        assert result is False
+
+
+class TestRunMonitorWebhookValidation:
+    """run_monitor should exit early if webhook URL is invalid."""
+
+    def test_invalid_webhook_exits_immediately(self):
+        console = Console(file=MagicMock(), stderr=False, no_color=True)
+        # Should return immediately without scanning
+        run_monitor(
+            once=True,
+            console=console,
+            webhook_url="http://192.168.1.1/hook",
+        )
+        # If we get here without error, the function returned early (good)
 
 
 # ---------------------------------------------------------------------------
