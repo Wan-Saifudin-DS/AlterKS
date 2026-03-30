@@ -113,6 +113,18 @@ class TestScanPackage:
         assert result.action == PolicyAction.ALLOW
         assert result.vulnerabilities == []
 
+    def test_osv_error_with_fail_closed_returns_alert(self):
+        osv = _mock_osv_client()
+        osv.query_package.side_effect = RuntimeError("network error")
+        config = _make_config(fail_closed=True)
+        scanner = Scanner(config=config, osv_client=osv)
+
+        result = scanner.scan_package("oops", "1.0.0")
+
+        assert result.action == PolicyAction.ALERT
+        assert "fail-closed" in result.reason
+        assert "network error" in result.reason
+
     def test_multiple_vulns_uses_highest_severity(self):
         vulns = [
             _make_vuln("V-1", Severity.LOW),
@@ -183,6 +195,33 @@ class TestScanEnvironment:
         assert len(results) == 2
         # Only "other" should be in the batch query
         osv.query_batch.assert_called_once_with([("other", "2.0.0")])
+
+    def test_batch_osv_error_fail_open(self):
+        fake_pkgs = [("requests", "2.31.0")]
+        osv = _mock_osv_client()
+        osv.query_batch.side_effect = RuntimeError("API down")
+        scanner = Scanner(config=_make_config(), osv_client=osv)
+
+        with patch("alterks.scanner._get_installed_packages", return_value=fake_pkgs):
+            results = scanner.scan_environment()
+
+        assert len(results) == 1
+        assert results[0].action == PolicyAction.ALLOW
+
+    def test_batch_osv_error_fail_closed(self):
+        fake_pkgs = [("requests", "2.31.0"), ("flask", "2.3.3")]
+        osv = _mock_osv_client()
+        osv.query_batch.side_effect = RuntimeError("API down")
+        config = _make_config(fail_closed=True)
+        scanner = Scanner(config=config, osv_client=osv)
+
+        with patch("alterks.scanner._get_installed_packages", return_value=fake_pkgs):
+            results = scanner.scan_environment()
+
+        assert len(results) == 2
+        for r in results:
+            assert r.action == PolicyAction.ALERT
+            assert "fail-closed" in r.reason
 
 
 # ---------------------------------------------------------------------------

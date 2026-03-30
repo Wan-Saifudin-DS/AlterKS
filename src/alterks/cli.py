@@ -175,11 +175,17 @@ def main(ctx: click.Context, verbose: bool, quiet: bool, no_color: bool) -> None
     default="table",
     help="Output format.",
 )
+@click.option(
+    "--fail-closed", is_flag=True, default=False,
+    help="Alert instead of allowing when vulnerability data is unavailable.",
+)
 @click.pass_context
-def scan(ctx: click.Context, requirements: Optional[Path], output_format: str) -> None:
+def scan(ctx: click.Context, requirements: Optional[Path], output_format: str, fail_closed: bool) -> None:
     """Scan installed packages or a requirements file for vulnerabilities."""
     console: Console = ctx.obj["console"]
     config = load_config()
+    if fail_closed:
+        config.fail_closed = True
     scanner = Scanner(config=config)
 
     if requirements:
@@ -221,8 +227,12 @@ def scan(ctx: click.Context, requirements: Optional[Path], output_format: str) -
 @main.command()
 @click.argument("package")
 @click.option("--dry-run", is_flag=True, help="Scan only, do not install.")
+@click.option(
+    "--fail-closed", is_flag=True, default=False,
+    help="Alert instead of allowing when vulnerability data is unavailable.",
+)
 @click.pass_context
-def install(ctx: click.Context, package: str, dry_run: bool) -> None:
+def install(ctx: click.Context, package: str, dry_run: bool, fail_closed: bool) -> None:
     """Pre-scan a package, then install it if safe.
 
     PACKAGE should be in pip format (e.g. ``requests==2.31.0`` or just
@@ -233,6 +243,8 @@ def install(ctx: click.Context, package: str, dry_run: bool) -> None:
     from alterks.pip_hook import resolve_and_scan
 
     config = load_config()
+    if fail_closed:
+        config.fail_closed = True
     result = resolve_and_scan(package, config)
 
     if result is None:

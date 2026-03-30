@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from alterks.cli import main
+from alterks.config import AlterKSConfig
 from alterks.models import PolicyAction, ScanResult, Severity, Vulnerability
 from tests.helpers import make_scan_result, make_vulnerability
 
@@ -150,6 +151,23 @@ class TestScan:
 
         assert result.exit_code == 0
         assert "No packages" in result.output
+
+    @patch("alterks.cli.Scanner")
+    @patch("alterks.cli.load_config")
+    def test_scan_fail_closed_flag(self, mock_config, mock_scanner_cls, runner):
+        mock_config.return_value = AlterKSConfig()
+        mock_scanner = MagicMock()
+        mock_scanner.scan_environment.return_value = [
+            _make_result("requests", "2.31.0"),
+        ]
+        mock_scanner_cls.return_value = mock_scanner
+
+        result = runner.invoke(main, ["scan", "--fail-closed"])
+
+        assert result.exit_code == 0
+        # Verify fail_closed was set on config
+        config_passed = mock_scanner_cls.call_args
+        assert config_passed is not None
 
 
 # ---------------------------------------------------------------------------

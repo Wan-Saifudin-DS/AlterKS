@@ -73,6 +73,17 @@ class Scanner:
             vulns = self.osv.query_package(name, version)
         except Exception as exc:
             logger.error("OSV query failed for %s==%s: %s", name, version, exc)
+            if self.config.fail_closed:
+                return ScanResult(
+                    name=name,
+                    version=version,
+                    action=PolicyAction.ALERT,
+                    reason=f"OSV query failed ({exc}); fail-closed policy in effect",
+                )
+            logger.warning(
+                "Fail-open: allowing %s==%s because vulnerability data is unavailable",
+                name, version,
+            )
             vulns = []
 
         action, reason = self._resolve_action(name, version, vulns)
@@ -144,6 +155,19 @@ class Scanner:
             batch_vulns = self.osv.query_batch(to_query)
         except Exception as exc:
             logger.error("OSV batch query failed: %s", exc)
+            if self.config.fail_closed:
+                for name, version in to_query:
+                    results.append(ScanResult(
+                        name=name,
+                        version=version,
+                        action=PolicyAction.ALERT,
+                        reason=f"OSV query failed ({exc}); fail-closed policy in effect",
+                    ))
+                return results
+            logger.warning(
+                "Fail-open: allowing %d package(s) because vulnerability data is unavailable",
+                len(to_query),
+            )
             batch_vulns = {pkg: [] for pkg in to_query}
 
         for name, version in to_query:

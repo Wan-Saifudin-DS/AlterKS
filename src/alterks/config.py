@@ -54,6 +54,7 @@ class AlterKSConfig:
     allowlist: list[str] = field(default_factory=list)
     blocklist: list[str] = field(default_factory=list)
     heuristic_weights: Dict[str, float] = field(default_factory=dict)
+    fail_closed: bool = False
 
     def __post_init__(self) -> None:
         if not self.severity_actions:
@@ -158,6 +159,7 @@ def _build_config(raw: Dict[str, Any]) -> AlterKSConfig:
         allowlist=allowlist,
         blocklist=blocklist,
         heuristic_weights=heuristic_weights,
+        fail_closed=bool(raw.get("fail_closed", False)),
     )
 
 

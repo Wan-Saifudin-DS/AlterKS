@@ -46,6 +46,10 @@ class TestAlterKSConfigDefaults:
         assert cfg.allowlist == []
         assert cfg.blocklist == []
 
+    def test_default_fail_closed_is_false(self):
+        cfg = AlterKSConfig()
+        assert cfg.fail_closed is False
+
 
 # ---------------------------------------------------------------------------
 # AlterKSConfig query helpers
@@ -136,6 +140,14 @@ class TestBuildConfig:
         cfg = _build_config(raw)
         assert cfg.heuristic_weights["typosquatting"] == 0.50
         assert cfg.heuristic_weights["package_age"] == 0.50
+
+    def test_fail_closed_from_raw(self):
+        cfg = _build_config({"fail_closed": True})
+        assert cfg.fail_closed is True
+
+    def test_fail_closed_default_false(self):
+        cfg = _build_config({})
+        assert cfg.fail_closed is False
 
 
 # ---------------------------------------------------------------------------
