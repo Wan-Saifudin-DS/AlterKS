@@ -280,6 +280,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.9 — Security Fix
+
+- **Fixed**: TOCTOU race condition in quarantine manifest operations (OWASP A04:2021 — Insecure Design). Manifest writes are now atomic via temp file + `os.replace()`. All read-modify-write operations are protected by a cross-platform file lock (`fcntl`/`msvcrt`), preventing concurrent data loss.
+
 ### v0.1.8 — Security Fix
 
 - **Fixed**: PyPI cache poisoning via HMAC-SHA256 integrity verification (OWASP A08:2021 — Software and Data Integrity Failures). Cache entries are now signed with a machine-local secret key; tampered or unsigned entries are discarded and refetched. Cache directory created with restrictive permissions (0700 on Unix).

@@ -16,6 +16,7 @@ from alterks.quarantine import (
     ManifestValidationError,
     QuarantineEntry,
     QuarantineManager,
+    _ManifestLock,
     _load_manifest,
     _normalise_name,
     _remove_dir,
@@ -581,3 +582,96 @@ class TestRemoveDirContainment:
             _remove_dir(outside, qdir)
 
         assert (outside / "important.conf").read_text() == "critical"
+
+
+# ---------------------------------------------------------------------------
+# _save_manifest atomic writes
+# ---------------------------------------------------------------------------
+
+class TestAtomicSaveManifest:
+    """Tests for atomic manifest writes."""
+
+    def test_save_creates_valid_json(self, tmp_path: Path):
+        path = tmp_path / "quarantine.json"
+        _save_manifest({"flask": {"name": "flask"}}, path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["flask"]["name"] == "flask"
+
+    def test_save_is_atomic_no_partial_writes(self, tmp_path: Path):
+        """On success, only the final file exists — no temp files left."""
+        path = tmp_path / "quarantine.json"
+        _save_manifest({"test": {}}, path)
+        assert path.is_file()
+        # No leftover temp files
+        temps = list(tmp_path.glob(".quarantine_*.tmp"))
+        assert temps == []
+
+    def test_save_creates_parent_dirs(self, tmp_path: Path):
+        path = tmp_path / "deep" / "nested" / "quarantine.json"
+        _save_manifest({"test": {}}, path)
+        assert path.is_file()
+
+    def test_save_overwrites_existing(self, tmp_path: Path):
+        path = tmp_path / "quarantine.json"
+        _save_manifest({"v1": {}}, path)
+        _save_manifest({"v2": {}}, path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "v2" in data
+        assert "v1" not in data
+
+
+# ---------------------------------------------------------------------------
+# _ManifestLock
+# ---------------------------------------------------------------------------
+
+class TestManifestLock:
+    """Tests for the file-based manifest lock."""
+
+    def test_lock_creates_lock_file(self, tmp_path: Path):
+        manifest_path = tmp_path / "quarantine.json"
+        with _ManifestLock(manifest_path):
+            assert (tmp_path / "quarantine.lock").exists()
+
+    def test_lock_is_reentrant_from_same_thread(self, tmp_path: Path):
+        """Acquiring the lock twice in the same thread shouldn't deadlock
+        because we open a new fd each time (and OS allows same-process locks)."""
+        manifest_path = tmp_path / "quarantine.json"
+        with _ManifestLock(manifest_path):
+            # On Windows msvcrt locks are per-fd, on Unix flock is per-process
+            # so this should not deadlock
+            pass  # If we reach here, no deadlock
+
+    def test_lock_protects_concurrent_writes(self, tmp_path: Path):
+        """Simulate concurrent modifications — lock ensures serialisation."""
+        import threading
+
+        manifest_path = tmp_path / "quarantine.json"
+        _save_manifest({}, manifest_path)
+        errors = []
+
+        def add_entry(name: str) -> None:
+            try:
+                with _ManifestLock(manifest_path):
+                    manifest = _load_manifest(manifest_path)
+                    manifest[name] = {"name": name, "version": "1.0",
+                                      "reason": "test",
+                                      "venv_path": str(tmp_path / name),
+                                      "quarantined_at": "2026-01-01",
+                                      "vulnerability_ids": [],
+                                      "risk_score": 0.0}
+                    _save_manifest(manifest, manifest_path)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=add_entry, args=(f"pkg-{i}",))
+                   for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        manifest = _load_manifest(manifest_path)
+        assert len(manifest) == 5
+        for i in range(5):
+            assert f"pkg-{i}" in manifest

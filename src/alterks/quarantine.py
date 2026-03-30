@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
+import tempfile
 import venv
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -137,12 +139,84 @@ def _load_manifest(path: Path) -> Dict[str, dict]:
 
 
 def _save_manifest(manifest: Dict[str, dict], path: Path) -> None:
-    """Persist the quarantine manifest to disk."""
+    """Persist the quarantine manifest atomically.
+
+    Writes to a temporary file in the same directory, then replaces the
+    target with ``os.replace()`` — atomic on the same filesystem.  This
+    prevents partial writes from corrupting the manifest.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(manifest, indent=2, default=str) + "\n",
-        encoding="utf-8",
+    content = json.dumps(manifest, indent=2, default=str) + "\n"
+    # Write to temp file in the same dir so os.replace is atomic
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=".quarantine_", suffix=".tmp",
     )
+    try:
+        os.write(fd, content.encode("utf-8"))
+        os.close(fd)
+        fd = -1  # mark as closed
+        os.replace(tmp, str(path))
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        # Clean up the temp file on failure
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+class _ManifestLock:
+    """Cross-platform file lock for the quarantine manifest.
+
+    Uses ``fcntl.flock()`` on Unix and ``msvcrt.locking()`` on Windows.
+    Designed for use as a context manager::
+
+        with _ManifestLock(manifest_path):
+            manifest = _load_manifest(manifest_path)
+            ...
+            _save_manifest(manifest, manifest_path)
+    """
+
+    def __init__(self, manifest_path: Path) -> None:
+        self._lock_path = manifest_path.with_suffix(".lock")
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fd: int = -1
+
+    def __enter__(self) -> "_ManifestLock":
+        self._fd = os.open(
+            str(self._lock_path),
+            os.O_CREAT | os.O_RDWR,
+        )
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(self._fd, msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._fd, fcntl.LOCK_EX)
+        except BaseException:
+            os.close(self._fd)
+            self._fd = -1
+            raise
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                try:
+                    msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            else:
+                import fcntl
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+        finally:
+            if self._fd >= 0:
+                os.close(self._fd)
+                self._fd = -1
 
 
 def _normalise_name(name: str) -> str:
@@ -214,10 +288,11 @@ class QuarantineManager:
             risk_score=risk_score,
         )
 
-        # Update manifest
-        manifest = _load_manifest(self.manifest_path)
-        manifest[key] = asdict(entry)
-        _save_manifest(manifest, self.manifest_path)
+        # Update manifest (locked + atomic)
+        with _ManifestLock(self.manifest_path):
+            manifest = _load_manifest(self.manifest_path)
+            manifest[key] = asdict(entry)
+            _save_manifest(manifest, self.manifest_path)
 
         logger.info("Quarantined %s==%s at %s", name, version, venv_path)
         return entry
@@ -263,8 +338,11 @@ class QuarantineManager:
             When the re-scan still flags the package and *force* is False.
         """
         key = _normalise_name(name)
-        manifest = _load_manifest(self.manifest_path)
-        data = manifest.get(key)
+
+        # Read entry under lock
+        with _ManifestLock(self.manifest_path):
+            manifest = _load_manifest(self.manifest_path)
+            data = manifest.get(key)
         if data is None:
             logger.warning("Package %s is not quarantined", name)
             return False
@@ -311,9 +389,11 @@ class QuarantineManager:
         if venv_path.exists():
             _remove_dir(venv_path, self.quarantine_dir)
 
-        # Remove from manifest
-        del manifest[key]
-        _save_manifest(manifest, self.manifest_path)
+        # Remove from manifest (locked + atomic)
+        with _ManifestLock(self.manifest_path):
+            manifest = _load_manifest(self.manifest_path)
+            manifest.pop(key, None)
+            _save_manifest(manifest, self.manifest_path)
 
         logger.info("Released %s==%s from quarantine", entry.name, entry.version)
         return True
@@ -324,18 +404,20 @@ class QuarantineManager:
         Deletes the quarantine venv and manifest entry.
         """
         key = _normalise_name(name)
-        manifest = _load_manifest(self.manifest_path)
-        if key not in manifest:
-            return False
 
-        data = manifest[key]
-        _validate_manifest_entry(data, self.quarantine_dir)
-        venv_path = Path(data.get("venv_path", ""))
-        if venv_path.exists():
-            _remove_dir(venv_path, self.quarantine_dir)
+        with _ManifestLock(self.manifest_path):
+            manifest = _load_manifest(self.manifest_path)
+            if key not in manifest:
+                return False
 
-        del manifest[key]
-        _save_manifest(manifest, self.manifest_path)
+            data = manifest[key]
+            _validate_manifest_entry(data, self.quarantine_dir)
+            venv_path = Path(data.get("venv_path", ""))
+            if venv_path.exists():
+                _remove_dir(venv_path, self.quarantine_dir)
+
+            del manifest[key]
+            _save_manifest(manifest, self.manifest_path)
 
         logger.info("Removed quarantined package %s", name)
         return True

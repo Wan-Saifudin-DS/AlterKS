@@ -6,7 +6,7 @@ Scans, monitors, and blocks risky or vulnerable packages using OSV.dev
 vulnerability data and PyPI metadata heuristics.
 """
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 __all__ = [
     "PolicyAction",
     "Severity",
