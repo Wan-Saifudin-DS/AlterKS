@@ -281,6 +281,11 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.18 — Design Fix
+
+- **Fixed**: UNKNOWN severity vulnerabilities defaulting to ALLOW (design gap). Vulnerabilities with unresolved severity now default to `alert` instead of silently passing. The `unknown` severity mapping is fully configurable in `pyproject.toml` under `[tool.alterks]` — users can override to `block`, `quarantine`, or `allow`.
+- **Changed**: Author in package metadata updated to "Ts Dr Wan Saifudin".
+
 ### v0.1.17 — Bug Fix
 
 - **Fixed**: Quarantine manifest keyed by name only, causing version collisions (INFO finding). The manifest now uses composite keys (`name==version`), so multiple versions of the same package can be quarantined independently. The `inspect`, `release`, and `remove` commands accept an optional `--version` / `-v` flag to target a specific version. Backward-compatible name-only lookups find the first matching entry.

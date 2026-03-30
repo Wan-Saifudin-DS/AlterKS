@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alterks"
-version = "0.1.17"
+version = "0.1.18"
 description = "ALTER KILL SWITCH — Python package scanner, monitor, and supply chain attack mitigation tool."
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.9"
 authors = [
-    { name = "AlterKS Contributors" },
+    { name = "Ts Dr Wan Saifudin" },
 ]
 keywords = [
     "security",
@@ -70,7 +70,7 @@ Issues = "https://github.com/Wan-Saifudin-DS/AlterKS/issues"
 # ---------------------------------------------------------------------------
 [tool.alterks]
 # Action per severity: "block", "quarantine", "alert", "allow"
-severity_actions = { critical = "block", high = "block", medium = "alert", low = "allow" }
+severity_actions = { critical = "block", high = "block", medium = "alert", low = "allow", unknown = "alert" }
 
 # Risk score threshold (0-100) — packages scoring above this trigger the action
 risk_threshold = 60

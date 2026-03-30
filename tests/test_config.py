@@ -32,6 +32,7 @@ class TestAlterKSConfigDefaults:
         assert cfg.action_for_severity(Severity.HIGH) == PolicyAction.BLOCK
         assert cfg.action_for_severity(Severity.MEDIUM) == PolicyAction.ALERT
         assert cfg.action_for_severity(Severity.LOW) == PolicyAction.ALLOW
+        assert cfg.action_for_severity(Severity.UNKNOWN) == PolicyAction.ALERT
 
     def test_default_risk_threshold(self):
         cfg = AlterKSConfig()
@@ -75,9 +76,9 @@ class TestAlterKSConfigHelpers:
         assert cfg.exceeds_risk_threshold(60.0) is True
         assert cfg.exceeds_risk_threshold(49.9) is False
 
-    def test_action_for_unknown_severity_defaults_allow(self):
+    def test_action_for_unknown_severity_defaults_alert(self):
         cfg = AlterKSConfig()
-        assert cfg.action_for_severity(Severity.UNKNOWN) == PolicyAction.ALLOW
+        assert cfg.action_for_severity(Severity.UNKNOWN) == PolicyAction.ALERT
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +104,11 @@ class TestParseSeverityActions:
         mapping = {"CRITICAL": "BLOCK"}
         result = _parse_severity_actions(mapping)
         assert result[Severity.CRITICAL] == PolicyAction.BLOCK
+
+    def test_unknown_severity_can_be_overridden_to_block(self):
+        mapping = {"unknown": "block"}
+        result = _parse_severity_actions(mapping)
+        assert result[Severity.UNKNOWN] == PolicyAction.BLOCK
 
 
 # ---------------------------------------------------------------------------

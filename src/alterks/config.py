@@ -29,6 +29,7 @@ DEFAULT_SEVERITY_ACTIONS: Dict[str, str] = {
     "high": "block",
     "medium": "alert",
     "low": "allow",
+    "unknown": "alert",
 }
 
 DEFAULT_HEURISTIC_WEIGHTS: Dict[str, float] = {
