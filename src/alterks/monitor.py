@@ -265,6 +265,7 @@ def notify_webhook(
             content=payload_bytes,
             timeout=timeout,
             headers=headers,
+            verify=True,
         )
         if resp.is_success:
             logger.info("Webhook notification sent to %s", webhook_url)

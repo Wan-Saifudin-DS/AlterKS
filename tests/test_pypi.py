@@ -375,3 +375,33 @@ class TestCacheIntegrity:
         # Should discard the old-format cache and refetch
         client.get_metadata("requests")
         assert route.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# TLS verification enforcement
+# ---------------------------------------------------------------------------
+
+class TestTLSVerification:
+    """Verify that httpx.Client is called with verify=True."""
+
+    @respx.mock
+    def test_client_uses_verify_true(self, tmp_path):
+        respx.get("https://pypi.org/pypi/requests/json").respond(
+            200, json=SAMPLE_PYPI_RESPONSE,
+        )
+        import unittest.mock as _m
+
+        original_cls = httpx.Client
+
+        captured = {}
+
+        class SpyClient(original_cls):
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                super().__init__(**kwargs)
+
+        with _m.patch("alterks.sources.pypi.httpx.Client", SpyClient):
+            client = PyPIClient(cache_dir=None)
+            client.get_metadata("requests")
+
+        assert captured.get("verify") is True

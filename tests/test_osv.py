@@ -248,3 +248,31 @@ class TestOSVClientQueryBatch:
         client = OSVClient(timeout=5, max_retries=1)
         results = client.query_batch([])
         assert results == {}
+
+
+# ---------------------------------------------------------------------------
+# TLS verification enforcement
+# ---------------------------------------------------------------------------
+
+class TestTLSVerification:
+    """Verify that httpx.AsyncClient is called with verify=True."""
+
+    @respx.mock
+    def test_async_client_uses_verify_true(self):
+        respx.post(OSV_QUERY_URL).respond(200, json={"vulns": []})
+        import unittest.mock as _m
+
+        original_cls = httpx.AsyncClient
+
+        captured = {}
+
+        class SpyAsyncClient(original_cls):
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                super().__init__(**kwargs)
+
+        with _m.patch("alterks.sources.osv.httpx.AsyncClient", SpyAsyncClient):
+            client = OSVClient(timeout=5, max_retries=1)
+            client.query_package("pkg", "1.0")
+
+        assert captured.get("verify") is True

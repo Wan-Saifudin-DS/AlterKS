@@ -230,6 +230,18 @@ class TestNotifyWebhook:
         assert result is False
 
     @patch("alterks.monitor.httpx.post")
+    def test_verify_true_enforced(self, mock_post):
+        """httpx.post is called with verify=True for TLS enforcement."""
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        notify_webhook({"x": 1}, "https://example.com/hook")
+
+        call_kwargs = mock_post.call_args
+        assert call_kwargs.kwargs.get("verify") is True
+
+    @patch("alterks.monitor.httpx.post")
     def test_hmac_signature_sent_with_secret(self, mock_post):
         """When webhook_secret is provided, X-AlterKS-Signature header is set."""
         mock_resp = MagicMock()

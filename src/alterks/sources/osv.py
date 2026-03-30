@@ -205,7 +205,9 @@ class OSVClient:
 
         for attempt in range(self._max_retries):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, verify=True,
+                ) as client:
                     response = await client.post(url, json=payload)
 
                 if response.status_code == 200:

@@ -265,7 +265,7 @@ class PyPIClient:
 
         url = PYPI_JSON_URL.format(package=package)
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, verify=True) as client:
                 resp = client.get(url, follow_redirects=True)
         except httpx.TimeoutException as exc:
             raise PyPIError(f"Timeout fetching {url}") from exc

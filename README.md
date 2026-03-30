@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.13 — Security Fix
+
+- **Fixed**: No explicit TLS verification enforcement (OWASP A02:2021 — Cryptographic Failures). All httpx clients now explicitly set `verify=True` — OSV API (`AsyncClient`), PyPI API (`Client`), and webhook POST. TLS certificate verification cannot be accidentally disabled or overridden.
+
 ### v0.1.12 — Security Fix
 
 - **Fixed**: Broad `except Exception` blocks replaced with specific exception types (OWASP A09:2021 — Security Logging and Monitoring Failures). OSV errors now catch `OSVError`/`httpx.HTTPError`, heuristic failures catch `KeyError`/`TypeError`/`ValueError`/`ZeroDivisionError`, requirement parsing catches `InvalidRequirement`/`ValueError`. Internal logic bugs are no longer silently masked.
