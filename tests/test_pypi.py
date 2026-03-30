@@ -17,9 +17,12 @@ from alterks.sources.pypi import (
     PyPIError,
     PyPIMetadata,
     ReleaseInfo,
+    _compute_hmac,
     _earliest_upload,
+    _get_hmac_key,
     _parse_datetime,
     _parse_metadata,
+    _verify_hmac,
 )
 
 # ---------------------------------------------------------------------------
@@ -276,3 +279,99 @@ class TestPyPICache:
         path = client._cache_path("requests")
         assert path is not None
         assert "requests" in path.name
+
+
+# ---------------------------------------------------------------------------
+# Cache integrity (HMAC)
+# ---------------------------------------------------------------------------
+
+class TestCacheIntegrity:
+    def test_hmac_key_created_on_first_use(self, tmp_path: Path):
+        key = _get_hmac_key(tmp_path)
+        assert len(key) == 32
+        assert (tmp_path / ".hmac_key").is_file()
+
+    def test_hmac_key_reused_on_subsequent_calls(self, tmp_path: Path):
+        key1 = _get_hmac_key(tmp_path)
+        key2 = _get_hmac_key(tmp_path)
+        assert key1 == key2
+
+    def test_hmac_key_regenerated_if_corrupted(self, tmp_path: Path):
+        key_file = tmp_path / ".hmac_key"
+        key_file.write_bytes(b"short")  # Wrong length
+        key = _get_hmac_key(tmp_path)
+        assert len(key) == 32
+        assert key != b"short"
+
+    def test_compute_and_verify_hmac(self):
+        key = b"x" * 32
+        payload = '{"name": "test"}'
+        digest = _compute_hmac(payload, key)
+        assert _verify_hmac(payload, digest, key) is True
+
+    def test_verify_hmac_rejects_tampered_payload(self):
+        key = b"x" * 32
+        payload = '{"name": "test"}'
+        digest = _compute_hmac(payload, key)
+        assert _verify_hmac('{"name": "evil"}', digest, key) is False
+
+    def test_verify_hmac_rejects_wrong_key(self):
+        key1 = b"a" * 32
+        key2 = b"b" * 32
+        payload = '{"name": "test"}'
+        digest = _compute_hmac(payload, key1)
+        assert _verify_hmac(payload, digest, key2) is False
+
+    @respx.mock
+    def test_cached_entry_has_hmac(self, tmp_path: Path):
+        respx.get("https://pypi.org/pypi/requests/json").mock(
+            return_value=httpx.Response(200, json=SAMPLE_PYPI_RESPONSE)
+        )
+        client = PyPIClient(cache_dir=tmp_path, cache_ttl=3600)
+        client.get_metadata("requests")
+
+        # Inspect the written cache file
+        cache_files = list(tmp_path.glob("requests_*.json"))
+        assert len(cache_files) == 1
+        cached = json.loads(cache_files[0].read_text(encoding="utf-8"))
+        assert "_hmac" in cached
+        assert isinstance(cached["_hmac"], str)
+        assert len(cached["_hmac"]) == 64  # SHA-256 hex
+
+    @respx.mock
+    def test_tampered_cache_is_discarded(self, tmp_path: Path):
+        route = respx.get("https://pypi.org/pypi/requests/json").mock(
+            return_value=httpx.Response(200, json=SAMPLE_PYPI_RESPONSE)
+        )
+        client = PyPIClient(cache_dir=tmp_path, cache_ttl=3600)
+        client.get_metadata("requests")
+        assert route.call_count == 1
+
+        # Tamper with the cache file
+        cache_files = list(tmp_path.glob("requests_*.json"))
+        cached = json.loads(cache_files[0].read_text(encoding="utf-8"))
+        cached["info"]["name"] = "evil-override"
+        cache_files[0].write_text(json.dumps(cached), encoding="utf-8")
+
+        # Next read should detect tampering and refetch
+        client.get_metadata("requests")
+        assert route.call_count == 2
+
+    @respx.mock
+    def test_cache_without_hmac_is_discarded(self, tmp_path: Path):
+        route = respx.get("https://pypi.org/pypi/requests/json").mock(
+            return_value=httpx.Response(200, json=SAMPLE_PYPI_RESPONSE)
+        )
+        client = PyPIClient(cache_dir=tmp_path, cache_ttl=3600)
+
+        # Write a cache file without HMAC (old format)
+        import time as _time
+        cache_path = client._cache_path("requests")
+        old_format = dict(SAMPLE_PYPI_RESPONSE)
+        old_format["_cached_at"] = _time.time()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(old_format), encoding="utf-8")
+
+        # Should discard the old-format cache and refetch
+        client.get_metadata("requests")
+        assert route.call_count == 1

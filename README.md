@@ -280,6 +280,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.8 — Security Fix
+
+- **Fixed**: PyPI cache poisoning via HMAC-SHA256 integrity verification (OWASP A08:2021 — Software and Data Integrity Failures). Cache entries are now signed with a machine-local secret key; tampered or unsigned entries are discarded and refetched. Cache directory created with restrictive permissions (0700 on Unix).
+
 ### v0.1.7 — Security Fix
 
 - **Fixed**: Fail-open on OSV errors (OWASP A04:2021 — Insecure Design). Added `fail_closed` config option and `--fail-closed` CLI flag for `scan` and `install`. When enabled, OSV query failures result in `ALERT` instead of silently allowing packages through. Explicit warning logs emitted in both modes.

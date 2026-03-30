@@ -11,8 +11,12 @@ PyPI on repeated scans.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
+import os
+import secrets
+import stat
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -31,6 +35,60 @@ DEFAULT_CACHE_DIR = Path.home() / ".alterks" / "cache"
 
 class PyPIError(Exception):
     """Raised when a PyPI API request fails."""
+
+
+# ---------------------------------------------------------------------------
+# Cache integrity helpers
+# ---------------------------------------------------------------------------
+
+_HMAC_KEY_FILE = ".hmac_key"
+_HMAC_KEY_LENGTH = 32  # 256-bit key
+
+
+def _ensure_cache_dir(cache_dir: Path) -> None:
+    """Create the cache directory with restrictive permissions."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Restrict to owner-only on platforms that support it
+    if os.name != "nt":
+        try:
+            cache_dir.chmod(stat.S_IRWXU)  # 0o700
+        except OSError:
+            pass
+
+
+def _get_hmac_key(cache_dir: Path) -> bytes:
+    """Read or create a machine-local HMAC key for cache integrity."""
+    key_path = cache_dir / _HMAC_KEY_FILE
+    try:
+        if key_path.is_file():
+            key = key_path.read_bytes()
+            if len(key) == _HMAC_KEY_LENGTH:
+                return key
+            # Corrupted or wrong length — regenerate
+            logger.warning("HMAC key file corrupted, regenerating")
+    except OSError:
+        pass
+
+    key = secrets.token_bytes(_HMAC_KEY_LENGTH)
+    _ensure_cache_dir(cache_dir)
+    try:
+        key_path.write_bytes(key)
+        if os.name != "nt":
+            key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+    except OSError as exc:
+        logger.warning("Could not write HMAC key: %s", exc)
+    return key
+
+
+def _compute_hmac(payload: str, key: bytes) -> str:
+    """Compute HMAC-SHA256 hex digest over a string payload."""
+    return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _verify_hmac(payload: str, expected: str, key: bytes) -> bool:
+    """Verify an HMAC-SHA256 hex digest using constant-time comparison."""
+    computed = _compute_hmac(payload, key)
+    return hmac.compare_digest(computed, expected)
 
 
 # ---------------------------------------------------------------------------
@@ -156,11 +214,25 @@ class PyPIClient:
         if path is None or not path.is_file():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            raw_text = path.read_text(encoding="utf-8")
+            data = json.loads(raw_text)
             cached_at = data.get("_cached_at", 0)
             if time.time() - cached_at > self.cache_ttl:
                 logger.debug("Cache expired for %s", package)
                 return None
+
+            # Verify HMAC integrity
+            stored_hmac = data.pop("_hmac", None)
+            if stored_hmac is None:
+                logger.warning("Cache entry for %s has no HMAC — discarding", package)
+                return None
+            # Re-serialize without _hmac for verification
+            verify_payload = json.dumps(data, sort_keys=True)
+            key = _get_hmac_key(self.cache_dir)
+            if not _verify_hmac(verify_payload, stored_hmac, key):
+                logger.warning("Cache integrity check failed for %s — discarding", package)
+                return None
+
             return data
         except (json.JSONDecodeError, OSError) as exc:
             logger.debug("Cache read failed for %s: %s", package, exc)
@@ -171,9 +243,13 @@ class PyPIClient:
         if path is None:
             return
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_cache_dir(path.parent)
             payload = dict(data)
             payload["_cached_at"] = time.time()
+            # Compute HMAC over the deterministic JSON (without _hmac)
+            verify_payload = json.dumps(payload, sort_keys=True)
+            key = _get_hmac_key(self.cache_dir)
+            payload["_hmac"] = _compute_hmac(verify_payload, key)
             path.write_text(json.dumps(payload), encoding="utf-8")
         except OSError as exc:
             logger.debug("Cache write failed for %s: %s", package, exc)
