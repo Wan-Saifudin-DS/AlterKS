@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alterks"
+version = "0.1.0"
+description = "ALTER KILL SWITCH — Python package scanner, monitor, and supply chain attack mitigation tool."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "AlterKS Contributors" },
+]
+keywords = [
+    "security",
+    "supply-chain",
+    "vulnerability",
+    "scanner",
+    "kill-switch",
+    "pip",
+    "pypi",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "httpx>=0.24",
+    "packaging>=21.0",
+    "rich>=12.0",
+    "click>=8.0",
+    "tomli>=1.1; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "respx>=0.20",
+    "build>=1.0",
+    "twine>=4.0",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+alterks = "alterks.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Wan-Saifudin-DS/AlterKS"
+Documentation = "https://github.com/Wan-Saifudin-DS/AlterKS#readme"
+Repository = "https://github.com/Wan-Saifudin-DS/AlterKS"
+Issues = "https://github.com/Wan-Saifudin-DS/AlterKS/issues"
+
+# ---------------------------------------------------------------------------
+# AlterKS policy configuration (user-facing defaults)
+# Users override these in their own pyproject.toml under [tool.alterks]
+# ---------------------------------------------------------------------------
+[tool.alterks]
+# Action per severity: "block", "quarantine", "alert", "allow"
+severity_actions = { critical = "block", high = "block", medium = "alert", low = "allow" }
+
+# Risk score threshold (0-100) — packages scoring above this trigger the action
+risk_threshold = 60
+
+# Packages that are always allowed regardless of scan results
+allowlist = []
+
+# Packages that are always blocked regardless of scan results
+blocklist = []
+
+# Heuristic weights (must sum to 1.0 conceptually, but normalized internally)
+[tool.alterks.heuristic_weights]
+typosquatting = 0.30
+package_age = 0.20
+maintainer_count = 0.15
+release_pattern = 0.15
+metadata_quality = 0.20
+
+# ---------------------------------------------------------------------------
+# Tool configuration
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+packages = ["src/alterks"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
