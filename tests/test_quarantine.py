@@ -18,6 +18,7 @@ from alterks.quarantine import (
     QuarantineManager,
     _ManifestLock,
     _load_manifest,
+    _manifest_key,
     _normalise_name,
     _remove_dir,
     _save_manifest,
@@ -113,7 +114,7 @@ class TestQuarantinePackage:
 
         # Manifest updated
         data = json.loads(manifest.read_text())
-        assert "flask" in data
+        assert "flask==2.3.3" in data
 
     @patch("alterks.quarantine.subprocess.check_call")
     @patch("alterks.quarantine.venv.create")
@@ -125,7 +126,7 @@ class TestQuarantinePackage:
         mgr.quarantine_package("My_Package", "1.0", "test")
 
         data = json.loads((tmp_path / "q.json").read_text())
-        assert "my-package" in data
+        assert "my-package==1.0" in data
 
 
 # ---------------------------------------------------------------------------
@@ -143,15 +144,15 @@ class TestListQuarantined:
     def test_lists_entries(self, tmp_path: Path):
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "flask": {
+            "flask==2.0": {
                 "name": "flask", "version": "2.0", "reason": "vuln",
-                "venv_path": str(tmp_path / "flask"),
+                "venv_path": str(tmp_path / "flask_2.0"),
                 "quarantined_at": "2026-01-01T00:00:00",
                 "vulnerability_ids": [], "risk_score": 0.0,
             },
-            "requests": {
+            "requests==2.30": {
                 "name": "requests", "version": "2.30", "reason": "old",
-                "venv_path": str(tmp_path / "requests"),
+                "venv_path": str(tmp_path / "requests_2.30"),
                 "quarantined_at": "2026-01-01T00:00:00",
                 "vulnerability_ids": [], "risk_score": 0.0,
             },
@@ -171,7 +172,7 @@ class TestInspectQuarantined:
     def test_found(self, tmp_path: Path):
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "flask": {
+            "flask==2.0": {
                 "name": "flask", "version": "2.0", "reason": "vuln",
                 "venv_path": str(tmp_path), "quarantined_at": "2026-01-01",
                 "vulnerability_ids": ["PYSEC-1"], "risk_score": 42.0,
@@ -193,7 +194,7 @@ class TestInspectQuarantined:
     def test_normalised_lookup(self, tmp_path: Path):
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "my-package": {
+            "my-package==1.0": {
                 "name": "My_Package", "version": "1.0", "reason": "test",
                 "venv_path": str(tmp_path), "quarantined_at": "2026-01-01",
                 "vulnerability_ids": [], "risk_score": 0.0,
@@ -219,13 +220,13 @@ class TestReleaseQuarantined:
         )
 
         # Set up a quarantine dir that exists
-        venv_dir = tmp_path / "quarantine" / "flask"
+        venv_dir = tmp_path / "quarantine" / "flask_2.3.3"
         venv_dir.mkdir(parents=True)
         (venv_dir / "marker.txt").write_text("exists")
 
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "flask": {
+            "flask==2.3.3": {
                 "name": "flask", "version": "2.3.3", "reason": "vuln",
                 "venv_path": str(venv_dir), "quarantined_at": "2026-01-01",
                 "vulnerability_ids": [], "risk_score": 0.0,
@@ -245,7 +246,7 @@ class TestReleaseQuarantined:
         assert not venv_dir.exists()
         # Removed from manifest
         data = json.loads(manifest.read_text())
-        assert "flask" not in data
+        assert "flask==2.3.3" not in data
 
     @patch("alterks.scanner.Scanner")
     def test_release_blocked_when_still_flagged(self, mock_scanner_cls, tmp_path: Path):
@@ -261,9 +262,9 @@ class TestReleaseQuarantined:
 
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "evil-pkg": {
+            "evil-pkg==1.0": {
                 "name": "evil-pkg", "version": "1.0", "reason": "malicious",
-                "venv_path": str(tmp_path / "q" / "evil-pkg"),
+                "venv_path": str(tmp_path / "q" / "evil-pkg_1.0"),
                 "quarantined_at": "2026-01-01",
                 "vulnerability_ids": ["CVE-2026-0001"], "risk_score": 90.0,
             },
@@ -279,7 +280,7 @@ class TestReleaseQuarantined:
 
         # Package must remain in manifest
         data = json.loads(manifest.read_text())
-        assert "evil-pkg" in data
+        assert "evil-pkg==1.0" in data
 
     @patch("alterks.scanner.Scanner")
     @patch("alterks.quarantine.subprocess.check_call")
@@ -293,12 +294,12 @@ class TestReleaseQuarantined:
             reason="still vulnerable",
         )
 
-        venv_dir = tmp_path / "q" / "risky-pkg"
+        venv_dir = tmp_path / "q" / "risky-pkg_1.0"
         venv_dir.mkdir(parents=True)
 
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "risky-pkg": {
+            "risky-pkg==1.0": {
                 "name": "risky-pkg", "version": "1.0", "reason": "sus",
                 "venv_path": str(venv_dir), "quarantined_at": "2026-01-01",
                 "vulnerability_ids": [], "risk_score": 70.0,
@@ -314,7 +315,7 @@ class TestReleaseQuarantined:
         assert result is True
         mock_pip.assert_called_once()
         data = json.loads(manifest.read_text())
-        assert "risky-pkg" not in data
+        assert "risky-pkg==1.0" not in data
 
     def test_release_not_found(self, tmp_path: Path):
         mgr = QuarantineManager(
@@ -330,12 +331,12 @@ class TestReleaseQuarantined:
 
 class TestRemoveQuarantined:
     def test_remove_cleans_venv_and_manifest(self, tmp_path: Path):
-        venv_dir = tmp_path / "q" / "flask"
+        venv_dir = tmp_path / "q" / "flask_2.0"
         venv_dir.mkdir(parents=True)
 
         manifest = tmp_path / "q.json"
         manifest.write_text(json.dumps({
-            "flask": {
+            "flask==2.0": {
                 "name": "flask", "version": "2.0", "reason": "test",
                 "venv_path": str(venv_dir), "quarantined_at": "2026-01-01",
                 "vulnerability_ids": [], "risk_score": 0.0,
@@ -346,7 +347,7 @@ class TestRemoveQuarantined:
         assert mgr.remove_quarantined("flask") is True
         assert not venv_dir.exists()
         data = json.loads(manifest.read_text())
-        assert "flask" not in data
+        assert "flask==2.0" not in data
 
     def test_remove_not_found(self, tmp_path: Path):
         mgr = QuarantineManager(
@@ -482,14 +483,14 @@ class TestManifestValidationIntegration:
             "name": "flask",
             "version": "2.0",
             "reason": "vuln",
-            "venv_path": str(tmp_path / "q" / "flask"),
+            "venv_path": str(tmp_path / "q" / "flask_2.0"),
             "quarantined_at": "2026-01-01T00:00:00",
             "vulnerability_ids": [],
             "risk_score": 0.0,
         }
         entry.update(overrides)
         manifest = tmp_path / "q.json"
-        manifest.write_text(json.dumps({"flask": entry}))
+        manifest.write_text(json.dumps({"flask==2.0": entry}))
         return manifest
 
     def test_list_skips_entry_with_unknown_keys(self, tmp_path: Path):
@@ -506,13 +507,13 @@ class TestManifestValidationIntegration:
         manifest = self._tampered_manifest(tmp_path, venv_path="/tmp/evil")
         mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
         with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
-            mgr.release_quarantined("flask")
+            mgr.release_quarantined("flask", version="2.0")
 
     def test_remove_rejects_tampered_venv_path(self, tmp_path: Path):
         manifest = self._tampered_manifest(tmp_path, venv_path="/")
         mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
         with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
-            mgr.remove_quarantined("flask")
+            mgr.remove_quarantined("flask", version="2.0")
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +654,7 @@ class TestManifestLock:
             try:
                 with _ManifestLock(manifest_path):
                     manifest = _load_manifest(manifest_path)
-                    manifest[name] = {"name": name, "version": "1.0",
+                    manifest[f"{name}==1.0"] = {"name": name, "version": "1.0",
                                       "reason": "test",
                                       "venv_path": str(tmp_path / name),
                                       "quarantined_at": "2026-01-01",
@@ -674,4 +675,85 @@ class TestManifestLock:
         manifest = _load_manifest(manifest_path)
         assert len(manifest) == 5
         for i in range(5):
-            assert f"pkg-{i}" in manifest
+            assert f"pkg-{i}==1.0" in manifest
+
+
+# ---------------------------------------------------------------------------
+# Composite key (_manifest_key) and version collisions
+# ---------------------------------------------------------------------------
+
+class TestManifestKey:
+    def test_simple(self):
+        assert _manifest_key("flask", "2.3.3") == "flask==2.3.3"
+
+    def test_normalises_name(self):
+        assert _manifest_key("My_Package", "1.0") == "my-package==1.0"
+
+    def test_different_versions_different_keys(self):
+        k1 = _manifest_key("flask", "2.3.3")
+        k2 = _manifest_key("flask", "3.0.0")
+        assert k1 != k2
+
+
+class TestVersionCollisions:
+    """Multiple versions of the same package can be quarantined independently."""
+
+    @patch("alterks.quarantine.subprocess.check_call")
+    @patch("alterks.quarantine.venv.create")
+    def test_quarantine_two_versions(self, mock_venv, mock_pip, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        manifest_path = tmp_path / "quarantine.json"
+        mgr = QuarantineManager(quarantine_dir=qdir, manifest_path=manifest_path)
+
+        mgr.quarantine_package("flask", "2.3.3", "old vuln")
+        mgr.quarantine_package("flask", "3.0.0", "new vuln")
+
+        data = json.loads(manifest_path.read_text())
+        assert "flask==2.3.3" in data
+        assert "flask==3.0.0" in data
+        assert len(data) == 2
+
+    @patch("alterks.quarantine.subprocess.check_call")
+    @patch("alterks.quarantine.venv.create")
+    def test_list_shows_all_versions(self, mock_venv, mock_pip, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        manifest_path = tmp_path / "quarantine.json"
+        mgr = QuarantineManager(quarantine_dir=qdir, manifest_path=manifest_path)
+
+        mgr.quarantine_package("flask", "2.3.3", "vuln-a")
+        mgr.quarantine_package("flask", "3.0.0", "vuln-b")
+
+        entries = mgr.list_quarantined()
+        versions = {e.version for e in entries if e.name == "flask"}
+        assert versions == {"2.3.3", "3.0.0"}
+
+    @patch("alterks.quarantine.subprocess.check_call")
+    @patch("alterks.quarantine.venv.create")
+    def test_inspect_with_version(self, mock_venv, mock_pip, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        manifest_path = tmp_path / "quarantine.json"
+        mgr = QuarantineManager(quarantine_dir=qdir, manifest_path=manifest_path)
+
+        mgr.quarantine_package("flask", "2.3.3", "vuln-a")
+        mgr.quarantine_package("flask", "3.0.0", "vuln-b")
+
+        entry = mgr.inspect_quarantined("flask", version="3.0.0")
+        assert entry is not None
+        assert entry.version == "3.0.0"
+        assert entry.reason == "vuln-b"
+
+    @patch("alterks.quarantine.subprocess.check_call")
+    @patch("alterks.quarantine.venv.create")
+    def test_remove_specific_version(self, mock_venv, mock_pip, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        manifest_path = tmp_path / "quarantine.json"
+        mgr = QuarantineManager(quarantine_dir=qdir, manifest_path=manifest_path)
+
+        mgr.quarantine_package("flask", "2.3.3", "vuln-a")
+        mgr.quarantine_package("flask", "3.0.0", "vuln-b")
+
+        assert mgr.remove_quarantined("flask", version="2.3.3") is True
+
+        data = json.loads(manifest_path.read_text())
+        assert "flask==2.3.3" not in data
+        assert "flask==3.0.0" in data

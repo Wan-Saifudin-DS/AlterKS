@@ -225,6 +225,11 @@ def _normalise_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _manifest_key(name: str, version: str) -> str:
+    """Composite manifest key: ``normalised-name==version``."""
+    return f"{_normalise_name(name)}=={version}"
+
+
 # ---------------------------------------------------------------------------
 # QuarantineManager
 # ---------------------------------------------------------------------------
@@ -267,8 +272,9 @@ class QuarantineManager:
         validate_package_name(name)
         validate_package_version(version)
 
-        key = _normalise_name(name)
-        venv_path = self.quarantine_dir / key
+        key = _manifest_key(name, version)
+        norm = _normalise_name(name)
+        venv_path = self.quarantine_dir / f"{norm}_{version}"
 
         # Create isolated venv
         logger.info("Creating quarantine venv at %s", venv_path)
@@ -309,25 +315,45 @@ class QuarantineManager:
                 logger.warning("Skipping malformed quarantine entry: %s — %s", data, exc)
         return entries
 
-    def inspect_quarantined(self, name: str) -> Optional[QuarantineEntry]:
-        """Return details of a quarantined package, or None if not found."""
-        key = _normalise_name(name)
-        manifest = _load_manifest(self.manifest_path)
-        data = manifest.get(key)
-        if data is None:
-            return None
-        try:
-            _validate_manifest_entry(data, self.quarantine_dir)
-            return QuarantineEntry(**data)
-        except (TypeError, ManifestValidationError) as exc:
-            logger.warning("Malformed quarantine entry for %s: %s", name, exc)
-            return None
+    def inspect_quarantined(self, name: str, version: Optional[str] = None) -> Optional[QuarantineEntry]:
+        """Return details of a quarantined package, or None if not found.
 
-    def release_quarantined(self, name: str, *, force: bool = False) -> bool:
+        When *version* is given, looks up the exact ``name==version``
+        entry.  When omitted, returns the first entry matching *name*.
+        """
+        manifest = _load_manifest(self.manifest_path)
+
+        if version is not None:
+            key = _manifest_key(name, version)
+            data = manifest.get(key)
+            if data is None:
+                return None
+            try:
+                _validate_manifest_entry(data, self.quarantine_dir)
+                return QuarantineEntry(**data)
+            except (TypeError, ManifestValidationError) as exc:
+                logger.warning("Malformed quarantine entry for %s: %s", key, exc)
+                return None
+
+        # No version — find first entry matching the normalised name
+        norm = _normalise_name(name)
+        for data in manifest.values():
+            try:
+                _validate_manifest_entry(data, self.quarantine_dir)
+                if _normalise_name(data.get("name", "")) == norm:
+                    return QuarantineEntry(**data)
+            except (TypeError, ManifestValidationError) as exc:
+                logger.warning("Malformed quarantine entry: %s", exc)
+        return None
+
+    def release_quarantined(self, name: str, version: Optional[str] = None, *, force: bool = False) -> bool:
         """Release a quarantined package — install it into the current env.
 
         Before installing, the package is re-scanned for vulnerabilities.
         If it still has issues the release is refused unless *force* is True.
+
+        When *version* is given, releases that exact entry.  When omitted,
+        releases the first entry matching *name*.
 
         Removes the quarantine venv and manifest entry.  Returns True if
         the package was found and released, False otherwise.
@@ -337,12 +363,25 @@ class QuarantineManager:
         QuarantineReleaseBlocked
             When the re-scan still flags the package and *force* is False.
         """
-        key = _normalise_name(name)
-
-        # Read entry under lock
+        # Resolve the key: exact if version given, else find first match
         with _ManifestLock(self.manifest_path):
             manifest = _load_manifest(self.manifest_path)
-            data = manifest.get(key)
+            if version is not None:
+                key = _manifest_key(name, version)
+                data = manifest.get(key)
+            else:
+                key = None
+                data = None
+                norm = _normalise_name(name)
+                for k, v in manifest.items():
+                    try:
+                        _validate_manifest_entry(v, self.quarantine_dir)
+                        if _normalise_name(v.get("name", "")) == norm:
+                            key = k
+                            data = v
+                            break
+                    except (TypeError, ManifestValidationError):
+                        continue
         if data is None:
             logger.warning("Package %s is not quarantined", name)
             return False
@@ -398,16 +437,31 @@ class QuarantineManager:
         logger.info("Released %s==%s from quarantine", entry.name, entry.version)
         return True
 
-    def remove_quarantined(self, name: str) -> bool:
+    def remove_quarantined(self, name: str, version: Optional[str] = None) -> bool:
         """Remove a quarantined package without installing it.
 
         Deletes the quarantine venv and manifest entry.
+        When *version* is given, removes that exact entry.  When omitted,
+        removes the first entry matching *name*.
         """
-        key = _normalise_name(name)
-
         with _ManifestLock(self.manifest_path):
             manifest = _load_manifest(self.manifest_path)
-            if key not in manifest:
+
+            if version is not None:
+                key = _manifest_key(name, version)
+            else:
+                key = None
+                norm = _normalise_name(name)
+                for k, v in manifest.items():
+                    try:
+                        _validate_manifest_entry(v, self.quarantine_dir)
+                        if _normalise_name(v.get("name", "")) == norm:
+                            key = k
+                            break
+                    except (TypeError, ManifestValidationError):
+                        continue
+
+            if key is None or key not in manifest:
                 return False
 
             data = manifest[key]

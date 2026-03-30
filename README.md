@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.17 — Bug Fix
+
+- **Fixed**: Quarantine manifest keyed by name only, causing version collisions (INFO finding). The manifest now uses composite keys (`name==version`), so multiple versions of the same package can be quarantined independently. The `inspect`, `release`, and `remove` commands accept an optional `--version` / `-v` flag to target a specific version. Backward-compatible name-only lookups find the first matching entry.
+
 ### v0.1.16 — Security Fix
 
 - **Fixed**: Static typosquatting list goes stale (OWASP A04:2021 — Insecure Design). Added `alterks update-db` command to dynamically refresh the bundled top-5000 PyPI packages list from [hugovk.github.io/top-pypi-packages](https://hugovk.github.io/top-pypi-packages/). Fetches with TLS verification, writes a timestamped file, and invalidates the in-memory cache so subsequent scans use fresh data.

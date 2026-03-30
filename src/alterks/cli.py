@@ -341,12 +341,13 @@ def quarantine_list(ctx: click.Context) -> None:
 
 @quarantine.command("inspect")
 @click.argument("name")
+@click.option("--version", "-v", "pkg_version", default=None, help="Specific version to inspect.")
 @click.pass_context
-def quarantine_inspect(ctx: click.Context, name: str) -> None:
+def quarantine_inspect(ctx: click.Context, name: str, pkg_version: Optional[str]) -> None:
     """Show details of a quarantined package."""
     console: Console = ctx.obj["console"]
     qm = QuarantineManager()
-    entry = qm.inspect_quarantined(name)
+    entry = qm.inspect_quarantined(name, version=pkg_version)
 
     if entry is None:
         console.print(f"Package '{name}' is not quarantined.", style="yellow")
@@ -364,9 +365,10 @@ def quarantine_inspect(ctx: click.Context, name: str) -> None:
 
 @quarantine.command("release")
 @click.argument("name")
+@click.option("--version", "-v", "pkg_version", default=None, help="Specific version to release.")
 @click.option("--force", is_flag=True, help="Release even if re-scan still flags the package.")
 @click.pass_context
-def quarantine_release(ctx: click.Context, name: str, force: bool) -> None:
+def quarantine_release(ctx: click.Context, name: str, pkg_version: Optional[str], force: bool) -> None:
     """Release a quarantined package into the current environment.
 
     Before installing, the package is re-scanned for vulnerabilities.
@@ -377,7 +379,7 @@ def quarantine_release(ctx: click.Context, name: str, force: bool) -> None:
     console: Console = ctx.obj["console"]
     qm = QuarantineManager()
     try:
-        if qm.release_quarantined(name, force=force):
+        if qm.release_quarantined(name, version=pkg_version, force=force):
             console.print(f"Released [bold]{name}[/bold] into current environment.", style="green")
         else:
             console.print(f"Package '{name}' not found in quarantine.", style="red")
@@ -392,12 +394,13 @@ def quarantine_release(ctx: click.Context, name: str, force: bool) -> None:
 
 @quarantine.command("remove")
 @click.argument("name")
+@click.option("--version", "-v", "pkg_version", default=None, help="Specific version to remove.")
 @click.pass_context
-def quarantine_remove(ctx: click.Context, name: str) -> None:
+def quarantine_remove(ctx: click.Context, name: str, pkg_version: Optional[str]) -> None:
     """Remove a quarantined package without installing it."""
     console: Console = ctx.obj["console"]
     qm = QuarantineManager()
-    if qm.remove_quarantined(name):
+    if qm.remove_quarantined(name, version=pkg_version):
         console.print(f"Removed [bold]{name}[/bold] from quarantine.", style="green")
     else:
         console.print(f"Package '{name}' not found in quarantine.", style="red")
