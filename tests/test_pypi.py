@@ -280,6 +280,16 @@ class TestPyPICache:
         assert path is not None
         assert "requests" in path.name
 
+    def test_cache_path_uses_full_sha256(self, tmp_path: Path):
+        """Cache filename must use full 64-char SHA-256 hex, not truncated."""
+        client = PyPIClient(cache_dir=tmp_path)
+        path = client._cache_path("requests")
+        assert path is not None
+        # Filename format: {name}_{sha256hex}.json
+        stem = path.stem  # e.g. requests_<64 hex chars>
+        hash_part = stem.split("_", 1)[1]
+        assert len(hash_part) == 64
+
 
 # ---------------------------------------------------------------------------
 # Cache integrity (HMAC)

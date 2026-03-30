@@ -213,7 +213,7 @@ class PyPIClient:
     def _cache_path(self, package: str) -> Optional[Path]:
         if self.cache_dir is None:
             return None
-        safe = hashlib.sha256(package.lower().encode()).hexdigest()[:16]
+        safe = hashlib.sha256(package.lower().encode()).hexdigest()
         return self.cache_dir / f"{package.lower()}_{safe}.json"
 
     def _read_cache(self, package: str) -> Optional[Dict[str, Any]]:

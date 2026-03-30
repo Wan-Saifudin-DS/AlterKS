@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.15 — Security Fix
+
+- **Fixed**: Truncated SHA-256 cache key inviting birthday-attack collisions (OWASP A08:2021 — Software and Data Integrity Failures). Cache filenames now use the full 64-character SHA-256 hex digest instead of a 16-character truncation, eliminating practical collision risk.
+
 ### v0.1.14 — Security Fix
 
 - **Fixed**: No rate limiting on PyPI requests (OWASP A05:2021 — Security Misconfiguration). Added a configurable `request_delay` (default 0.1 s) to `PyPIClient` with `time.monotonic()`-based throttling between consecutive HTTP requests. Prevents burst traffic that could trigger IP-level rate-limiting bans from PyPI. Cache hits bypass the throttle entirely.
