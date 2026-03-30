@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.21 — Security Fix
+
+- **Fixed**: Stale lock file causing permanent deadlock in quarantine operations (A04:2021 — Insecure Design). `_ManifestLock` now uses **non-blocking** lock acquisition with a configurable timeout (default 30 s) and retry loop. The owning process PID is written into the lock file; on timeout, the lock holder’s PID is checked via `os.kill(pid, 0)` (Unix) or `OpenProcess` (Windows). If the owner is no longer running, the stale lock is automatically reset. Raises `LockAcquisitionError` with a clear message if the lock still cannot be obtained.
+
 ### v0.1.20 — Security Fix
 
 - **Fixed**: DNS rebinding bypass in webhook SSRF validation (A10:2021 — SSRF). `validate_webhook_url()` now resolves hostnames to IP addresses via `socket.getaddrinfo()` and validates **all** resolved addresses against private, loopback, link-local, reserved, and cloud metadata blocklists. Previously, DNS names passed through without resolution, allowing an attacker to configure a domain that initially resolves to a public IP but rebinds to an internal address at request time.

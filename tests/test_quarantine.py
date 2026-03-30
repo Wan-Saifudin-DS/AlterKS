@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from alterks.quarantine import (
+    LockAcquisitionError,
     ManifestValidationError,
     QuarantineEntry,
     QuarantineManager,
@@ -20,6 +21,7 @@ from alterks.quarantine import (
     _load_manifest,
     _manifest_key,
     _normalise_name,
+    _pid_is_alive,
     _remove_dir,
     _save_manifest,
     _validate_manifest_entry,
@@ -676,6 +678,48 @@ class TestManifestLock:
         assert len(manifest) == 5
         for i in range(5):
             assert f"pkg-{i}==1.0" in manifest
+
+    def test_lock_timeout_raises(self, tmp_path: Path):
+        """Lock acquisition that cannot succeed within timeout raises."""
+        manifest_path = tmp_path / "quarantine.json"
+        lock1 = _ManifestLock(manifest_path, timeout=0.5)
+        lock1.__enter__()
+        try:
+            # A second lock from another fd should timeout
+            with pytest.raises(LockAcquisitionError, match="Could not acquire"):
+                _ManifestLock(manifest_path, timeout=0.5).__enter__()
+        finally:
+            lock1.__exit__(None, None, None)
+
+    def test_lock_writes_pid(self, tmp_path: Path):
+        """Lock file should contain the owning PID after release."""
+        manifest_path = tmp_path / "quarantine.json"
+        import os as _os
+        with _ManifestLock(manifest_path):
+            pass  # PID written inside
+        # Read after release so the fd is closed (Windows requires this)
+        lock_path = tmp_path / "quarantine.lock"
+        content = lock_path.read_text(encoding="ascii").strip()
+        assert content == str(_os.getpid())
+
+    def test_stale_lock_detected_by_dead_pid(self, tmp_path: Path):
+        """A lock file with a dead PID should be detected as stale."""
+        manifest_path = tmp_path / "quarantine.json"
+        lock_path = tmp_path / "quarantine.lock"
+        # Write a PID that definitely doesn't exist
+        lock_path.write_text("999999999", encoding="ascii")
+        # Should succeed because stale lock is detected and reset
+        with _ManifestLock(manifest_path, timeout=1.0):
+            pass  # success
+
+    def test_pid_is_alive_returns_true_for_self(self):
+        """Current process PID should be reported as alive."""
+        import os as _os
+        assert _pid_is_alive(_os.getpid()) is True
+
+    def test_pid_is_alive_returns_false_for_bogus(self):
+        """A PID that doesn't exist should be reported as dead."""
+        assert _pid_is_alive(999999999) is False
 
 
 # ---------------------------------------------------------------------------

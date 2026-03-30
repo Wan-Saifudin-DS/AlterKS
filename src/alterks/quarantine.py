@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import venv
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -167,10 +168,22 @@ def _save_manifest(manifest: Dict[str, dict], path: Path) -> None:
         raise
 
 
-class _ManifestLock:
-    """Cross-platform file lock for the quarantine manifest.
+class LockAcquisitionError(Exception):
+    """Raised when the manifest lock cannot be acquired within the timeout."""
 
-    Uses ``fcntl.flock()`` on Unix and ``msvcrt.locking()`` on Windows.
+
+class _ManifestLock:
+    """Cross-platform file lock for the quarantine manifest with timeout.
+
+    Uses ``fcntl.flock()`` on Unix and ``msvcrt.locking()`` on Windows,
+    both in **non-blocking** mode with a retry loop to enforce a timeout.
+
+    If the lock cannot be acquired within *timeout* seconds, raises
+    :class:`LockAcquisitionError` instead of blocking forever.
+
+    The owning process ID is written into the lock file so that stale
+    locks (left behind by a crashed process) can be detected and removed.
+
     Designed for use as a context manager::
 
         with _ManifestLock(manifest_path):
@@ -179,28 +192,62 @@ class _ManifestLock:
             _save_manifest(manifest, manifest_path)
     """
 
-    def __init__(self, manifest_path: Path) -> None:
+    DEFAULT_TIMEOUT: float = 30.0  # seconds
+    _RETRY_INTERVAL: float = 0.2   # seconds between non-blocking retries
+
+    def __init__(
+        self,
+        manifest_path: Path,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> None:
         self._lock_path = manifest_path.with_suffix(".lock")
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._timeout = timeout
         self._fd: int = -1
 
     def __enter__(self) -> "_ManifestLock":
+        deadline = time.monotonic() + self._timeout
+
         self._fd = os.open(
             str(self._lock_path),
             os.O_CREAT | os.O_RDWR,
         )
+
         try:
-            if sys.platform == "win32":
-                import msvcrt
-                msvcrt.locking(self._fd, msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self._fd, fcntl.LOCK_EX)
+            while True:
+                if self._try_lock():
+                    # Lock acquired — record our PID for stale-lock detection
+                    self._write_pid()
+                    return self
+
+                if time.monotonic() >= deadline:
+                    # Timeout — check if the lock is stale before giving up
+                    if self._is_stale():
+                        logger.warning(
+                            "Stale lock detected (owner PID no longer running). "
+                            "Resetting lock file %s",
+                            self._lock_path,
+                        )
+                        self._force_reset()
+                        # Try once more after reset
+                        if self._try_lock():
+                            self._write_pid()
+                            return self
+
+                    os.close(self._fd)
+                    self._fd = -1
+                    raise LockAcquisitionError(
+                        f"Could not acquire manifest lock within "
+                        f"{self._timeout}s. If no other AlterKS process is "
+                        f"running, delete {self._lock_path} manually."
+                    )
+
+                time.sleep(self._RETRY_INTERVAL)
         except BaseException:
-            os.close(self._fd)
-            self._fd = -1
+            if self._fd >= 0:
+                os.close(self._fd)
+                self._fd = -1
             raise
-        return self
 
     def __exit__(self, *exc_info: object) -> None:
         try:
@@ -217,6 +264,88 @@ class _ManifestLock:
             if self._fd >= 0:
                 os.close(self._fd)
                 self._fd = -1
+
+    # -- Internals -----------------------------------------------------------
+
+    def _try_lock(self) -> bool:
+        """Attempt a non-blocking lock. Return True on success."""
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(self._fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except (OSError, IOError):
+            return False
+
+    def _write_pid(self) -> None:
+        """Write the current PID into the lock file for stale detection."""
+        try:
+            os.lseek(self._fd, 0, os.SEEK_SET)
+            os.ftruncate(self._fd, 0)
+            os.write(self._fd, str(os.getpid()).encode("ascii"))
+        except OSError:
+            pass  # best-effort
+
+    def _read_owner_pid(self) -> int | None:
+        """Read the PID from the lock file, or None if unavailable."""
+        try:
+            text = self._lock_path.read_text(encoding="ascii").strip()
+            return int(text) if text else None
+        except (OSError, ValueError):
+            return None
+
+    def _is_stale(self) -> bool:
+        """Return True if the lock file's owner PID is no longer running."""
+        pid = self._read_owner_pid()
+        if pid is None:
+            # No PID recorded — treat as stale if lock file is old enough
+            return self._lock_file_is_old()
+        return not _pid_is_alive(pid)
+
+    def _lock_file_is_old(self) -> bool:
+        """Return True if the lock file was last modified > timeout ago."""
+        try:
+            mtime = self._lock_path.stat().st_mtime
+            return (time.time() - mtime) > self._timeout
+        except OSError:
+            return True
+
+    def _force_reset(self) -> None:
+        """Close and re-open the lock file descriptor after a stale lock."""
+        if self._fd >= 0:
+            os.close(self._fd)
+        self._fd = os.open(
+            str(self._lock_path),
+            os.O_CREAT | os.O_RDWR,
+        )
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """Check if a process with *pid* is currently running."""
+    if sys.platform == "win32":
+        # On Windows, use ctypes OpenProcess
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[union-attr]
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+        )
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[union-attr]
+            return True
+        return False
+    else:
+        # On Unix, os.kill(pid, 0) probes without sending a signal
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Process exists but we don't own it — still alive
+            return True
 
 
 def _normalise_name(name: str) -> str:
