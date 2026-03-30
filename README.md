@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.14 — Security Fix
+
+- **Fixed**: No rate limiting on PyPI requests (OWASP A05:2021 — Security Misconfiguration). Added a configurable `request_delay` (default 0.1 s) to `PyPIClient` with `time.monotonic()`-based throttling between consecutive HTTP requests. Prevents burst traffic that could trigger IP-level rate-limiting bans from PyPI. Cache hits bypass the throttle entirely.
+
 ### v0.1.13 — Security Fix
 
 - **Fixed**: No explicit TLS verification enforcement (OWASP A02:2021 — Cryptographic Failures). All httpx clients now explicitly set `verify=True` — OSV API (`AsyncClient`), PyPI API (`Client`), and webhook POST. TLS certificate verification cannot be accidentally disabled or overridden.

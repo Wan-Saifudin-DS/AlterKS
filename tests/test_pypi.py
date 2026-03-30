@@ -405,3 +405,65 @@ class TestTLSVerification:
             client.get_metadata("requests")
 
         assert captured.get("verify") is True
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+class TestRateLimiting:
+    """Verify that consecutive HTTP requests are throttled."""
+
+    @respx.mock
+    def test_throttle_enforces_delay(self):
+        """Two consecutive fetches should have at least request_delay gap."""
+        route = respx.get("https://pypi.org/pypi/requests/json").mock(
+            return_value=httpx.Response(200, json=SAMPLE_PYPI_RESPONSE)
+        )
+        delay = 0.15
+        client = PyPIClient(cache_dir=None, request_delay=delay)
+
+        start = time.monotonic()
+        client.get_metadata("requests")
+        client.get_metadata("requests")
+        elapsed = time.monotonic() - start
+
+        assert route.call_count == 2
+        # Total elapsed should be at least one delay interval
+        assert elapsed >= delay * 0.9  # small tolerance
+
+    @respx.mock
+    def test_cache_hit_bypasses_throttle(self, tmp_path):
+        """Cache hits should NOT invoke the throttle."""
+        route = respx.get("https://pypi.org/pypi/requests/json").mock(
+            return_value=httpx.Response(200, json=SAMPLE_PYPI_RESPONSE)
+        )
+        client = PyPIClient(cache_dir=tmp_path, cache_ttl=3600, request_delay=0.5)
+
+        client.get_metadata("requests")  # HTTP fetch + cache write
+        start = time.monotonic()
+        client.get_metadata("requests")  # cache hit — no throttle
+        elapsed = time.monotonic() - start
+
+        assert route.call_count == 1
+        assert elapsed < 0.3  # should be near-instant
+
+    @respx.mock
+    def test_zero_delay_disables_throttle(self):
+        """request_delay=0 should disable throttling."""
+        route = respx.get("https://pypi.org/pypi/requests/json").mock(
+            return_value=httpx.Response(200, json=SAMPLE_PYPI_RESPONSE)
+        )
+        client = PyPIClient(cache_dir=None, request_delay=0)
+
+        client.get_metadata("requests")
+        client.get_metadata("requests")
+
+        assert route.call_count == 2
+
+    def test_default_request_delay(self):
+        """PyPIClient should use DEFAULT_REQUEST_DELAY by default."""
+        from alterks.sources.pypi import DEFAULT_REQUEST_DELAY
+        client = PyPIClient(cache_dir=None)
+        assert client.request_delay == DEFAULT_REQUEST_DELAY
+        assert client.request_delay > 0

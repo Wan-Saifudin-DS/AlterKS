@@ -31,6 +31,7 @@ PYPI_JSON_URL = "https://pypi.org/pypi/{package}/json"
 DEFAULT_TIMEOUT = 15.0
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 DEFAULT_CACHE_DIR = Path.home() / ".alterks" / "cache"
+DEFAULT_REQUEST_DELAY = 0.1  # seconds between consecutive PyPI HTTP requests
 
 
 class PyPIError(Exception):
@@ -181,6 +182,9 @@ class PyPIClient:
         Cache time-to-live in seconds.
     timeout:
         HTTP request timeout in seconds.
+    request_delay:
+        Minimum seconds between consecutive HTTP requests to PyPI.
+        Prevents burst traffic that could trigger rate-limiting bans.
     """
 
     def __init__(
@@ -188,10 +192,13 @@ class PyPIClient:
         cache_dir: Optional[Path] = DEFAULT_CACHE_DIR,
         cache_ttl: float = DEFAULT_CACHE_TTL,
         timeout: float = DEFAULT_TIMEOUT,
+        request_delay: float = DEFAULT_REQUEST_DELAY,
     ) -> None:
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl
         self.timeout = timeout
+        self.request_delay = request_delay
+        self._last_request_time: float = 0.0
 
     def get_metadata(self, package: str) -> PyPIMetadata:
         """Fetch and parse metadata for a PyPI package.
@@ -254,6 +261,18 @@ class PyPIClient:
         except OSError as exc:
             logger.debug("Cache write failed for %s: %s", package, exc)
 
+    # -- Rate limiting -------------------------------------------------------
+
+    def _throttle(self) -> None:
+        """Enforce minimum delay between consecutive HTTP requests."""
+        if self.request_delay <= 0:
+            return
+        elapsed = time.monotonic() - self._last_request_time
+        remaining = self.request_delay - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last_request_time = time.monotonic()
+
     # -- HTTP ----------------------------------------------------------------
 
     def _fetch_json(self, package: str) -> Dict[str, Any]:
@@ -264,6 +283,7 @@ class PyPIClient:
             return cached
 
         url = PYPI_JSON_URL.format(package=package)
+        self._throttle()
         try:
             with httpx.Client(timeout=self.timeout, verify=True) as client:
                 resp = client.get(url, follow_redirects=True)
