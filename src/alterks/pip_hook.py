@@ -11,9 +11,11 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from packaging.requirements import InvalidRequirement, Requirement
+
 from alterks.config import AlterKSConfig, load_config
 from alterks.heuristics import compute_risk
-from alterks.models import PackageRisk, PolicyAction, ScanResult
+from alterks.models import PackageRisk, PolicyAction, ScanResult, validate_package_name, validate_package_version
 from alterks.scanner import Scanner
 from alterks.sources.pypi import PyPIClient, PyPIError
 
@@ -100,13 +102,33 @@ def generate_constraints(
 # ---------------------------------------------------------------------------
 
 def _parse_spec(spec: str) -> Tuple[str, Optional[str]]:
-    """Parse a pip-style spec into ``(name, version_or_None)``."""
+    """Parse a pip-style spec into ``(name, version_or_None)``.
+
+    Uses :class:`packaging.requirements.Requirement` for rigorous parsing,
+    preventing argument injection via crafted version strings.
+
+    Raises
+    ------
+    ValueError
+        If the spec is not a valid PEP 508 requirement or the parsed
+        name/version fails safety validation.
+    """
     spec = spec.strip()
-    if "==" in spec:
-        parts = spec.split("==", 1)
-        return parts[0].strip(), parts[1].strip()
-    # Strip version specifiers for unpinned specs
-    for sep in (">=", "<=", "!=", "~=", ">", "<"):
-        if sep in spec:
-            return spec.split(sep, 1)[0].strip(), None
-    return spec, None
+    if not spec:
+        raise ValueError("Empty package spec.")
+
+    try:
+        req = Requirement(spec)
+    except InvalidRequirement as exc:
+        raise ValueError(f"Invalid package spec: {spec!r} ({exc})") from exc
+
+    name = validate_package_name(req.name)
+
+    # Extract pinned version from == specifier if present
+    version: Optional[str] = None
+    for specifier in req.specifier:
+        if specifier.operator == "==":
+            version = validate_package_version(specifier.version)
+            break
+
+    return name, version

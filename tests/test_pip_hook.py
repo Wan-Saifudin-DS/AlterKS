@@ -40,6 +40,54 @@ class TestParseSpec:
         assert name == "flask"
         assert version == "2.3.3"
 
+    # --- Injection prevention tests (fix #10) ---
+
+    def test_rejects_flag_injection_in_version(self):
+        """Version portion cannot contain pip flags."""
+        with pytest.raises(ValueError):
+            _parse_spec("pkg==1.0 --index-url=https://evil.com/simple")
+
+    def test_rejects_flag_injection_in_name(self):
+        """Name portion cannot look like a pip flag."""
+        with pytest.raises(ValueError):
+            _parse_spec("--index-url=https://evil.com/simple")
+
+    def test_rejects_flag_as_version(self):
+        """Version like '--pre' should be caught by packaging validation."""
+        with pytest.raises(ValueError):
+            _parse_spec("pkg==--pre")
+
+    def test_rejects_semicolon_injection(self):
+        """Shell command injection via semicolons should be rejected."""
+        with pytest.raises(ValueError):
+            _parse_spec("pkg==1.0; rm -rf /")
+
+    def test_rejects_empty_spec(self):
+        with pytest.raises(ValueError, match="Empty"):
+            _parse_spec("")
+
+    def test_rejects_whitespace_only(self):
+        with pytest.raises(ValueError, match="Empty"):
+            _parse_spec("   ")
+
+    def test_complex_pinned_version(self):
+        """Pre-release and post-release tags are valid."""
+        name, version = _parse_spec("django==4.2.1rc1")
+        assert name == "django"
+        assert version == "4.2.1rc1"
+
+    def test_multiple_specifiers_returns_pinned(self):
+        """When == is among multiple specifiers, it's extracted."""
+        name, version = _parse_spec("requests>=2.0,==2.31.0")
+        assert name == "requests"
+        assert version == "2.31.0"
+
+    def test_not_equal_returns_none(self):
+        """!= specifier does not set a pinned version."""
+        name, version = _parse_spec("requests!=2.30.0")
+        assert name == "requests"
+        assert version is None
+
 
 # ---------------------------------------------------------------------------
 # resolve_and_scan
