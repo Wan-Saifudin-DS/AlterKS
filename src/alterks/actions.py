@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, TextIO
@@ -231,14 +233,72 @@ def _do_allow(result: ScanResult) -> ActionResult:
 
 
 # ---------------------------------------------------------------------------
-# JSON report
+# JSON report (with file locking to prevent concurrent write corruption)
 # ---------------------------------------------------------------------------
 
+_REPORT_LOCK_TIMEOUT: float = 10.0  # seconds
+_REPORT_LOCK_RETRY: float = 0.1     # seconds between retries
+
+
 def _write_json_report(action_result: ActionResult, path: Path) -> None:
-    """Append an action result to a JSON-lines report file."""
+    """Append an action result to a JSON-lines report file.
+
+    An exclusive file lock is held for the duration of the write so that
+    concurrent ``alterks install`` processes writing to the same report
+    file do not interleave output and corrupt the JSON-lines format.
+    """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(action_result.to_dict()) + "\n")
+        line = json.dumps(action_result.to_dict()) + "\n"
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        _locked_append(path, lock_path, line)
     except OSError as exc:
         logger.error("Failed to write report to %s: %s", path, exc)
+
+
+def _locked_append(path: Path, lock_path: Path, data: str) -> None:
+    """Append *data* to *path* while holding an exclusive file lock."""
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    try:
+        _acquire_report_lock(fd, lock_path)
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(data)
+        finally:
+            _release_report_lock(fd)
+    finally:
+        os.close(fd)
+
+
+def _acquire_report_lock(fd: int, lock_path: Path) -> None:
+    """Non-blocking lock acquisition with timeout."""
+    deadline = time.monotonic() + _REPORT_LOCK_TIMEOUT
+    while True:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except (OSError, IOError):
+            if time.monotonic() >= deadline:
+                raise OSError(
+                    f"Could not acquire report lock {lock_path} "
+                    f"within {_REPORT_LOCK_TIMEOUT}s"
+                )
+            time.sleep(_REPORT_LOCK_RETRY)
+
+
+def _release_report_lock(fd: int) -> None:
+    """Release the file lock (best-effort)."""
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass

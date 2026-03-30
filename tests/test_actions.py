@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -15,6 +17,7 @@ from alterks.actions import (
     _do_block,
     _do_quarantine,
     _determine_final_action,
+    _locked_append,
     _write_json_report,
     execute_action,
     select_action,
@@ -265,3 +268,59 @@ class TestWriteJsonReport:
         assert path.is_file()
         data = json.loads(path.read_text().strip())
         assert data["package"] == "pkg"
+
+    def test_creates_lock_file(self, tmp_path: Path):
+        """Writing a report should create a .lock file alongside it."""
+        ar = ActionResult(
+            action=PolicyAction.ALERT,
+            package="pkg",
+            version="1.0",
+            reason="test",
+        )
+        path = tmp_path / "report.jsonl"
+        _write_json_report(ar, path)
+        lock_path = path.with_suffix(".jsonl.lock")
+        assert lock_path.exists()
+
+    def test_concurrent_writes_produce_valid_jsonl(self, tmp_path: Path):
+        """Multiple threads writing concurrently must not corrupt the file."""
+        path = tmp_path / "report.jsonl"
+        errors: list[Exception] = []
+
+        def writer(pkg_name: str) -> None:
+            try:
+                for i in range(20):
+                    ar = ActionResult(
+                        action=PolicyAction.ALERT,
+                        package=f"{pkg_name}-{i}",
+                        version="1.0",
+                        reason="concurrent",
+                    )
+                    _write_json_report(ar, path)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(f"pkg{t}",)) for t in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Writer threads raised: {errors}"
+
+        # Every line must be valid JSON
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 80  # 4 threads * 20 writes
+        for i, line in enumerate(lines):
+            try:
+                json.loads(line)
+            except json.JSONDecodeError:
+                pytest.fail(f"Line {i} is not valid JSON: {line!r}")
+
+    def test_locked_append_creates_parent_dirs(self, tmp_path: Path):
+        """_locked_append works even when the lock file dir already exists."""
+        path = tmp_path / "deep" / "nested" / "report.jsonl"
+        lock_path = tmp_path / "deep" / "nested" / "report.jsonl.lock"
+        path.parent.mkdir(parents=True)
+        _locked_append(path, lock_path, '{"test": true}\n')
+        assert json.loads(path.read_text().strip()) == {"test": True}

@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.22 — Security Fix
+
+- **Fixed**: `_write_json_report()` concurrent write corruption (A04:2021 — Insecure Design). Report file appends are now protected by an exclusive file lock using `msvcrt.locking(LK_NBLCK)` on Windows and `fcntl.flock(LOCK_EX | LOCK_NB)` on Unix, with a non-blocking retry loop and 10-second timeout. Multiple concurrent `alterks install` or `execute_action` calls writing to the same report file can no longer interleave mid-line and corrupt JSON-lines output.
+
 ### v0.1.21 — Security Fix
 
 - **Fixed**: Stale lock file causing permanent deadlock in quarantine operations (A04:2021 — Insecure Design). `_ManifestLock` now uses **non-blocking** lock acquisition with a configurable timeout (default 30 s) and retry loop. The owning process PID is written into the lock file; on timeout, the lock holder’s PID is checked via `os.kill(pid, 0)` (Unix) or `OpenProcess` (Windows). If the owner is no longer running, the stale lock is automatically reset. Raises `LockAcquisitionError` with a clear message if the lock still cannot be obtained.
