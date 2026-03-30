@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+
+import httpx
 
 from alterks.config import AlterKSConfig, DEFAULT_HEURISTIC_WEIGHTS
 from alterks.models import PackageRisk, RiskFactor
@@ -32,6 +35,12 @@ logger = logging.getLogger(__name__)
 
 _TOP_PACKAGES: Optional[Set[str]] = None
 _DATA_DIR = Path(__file__).resolve().parent / "data"
+
+TOP_PYPI_PACKAGES_URL = (
+    "https://hugovk.github.io/top-pypi-packages/"
+    "top-pypi-packages-30-days.min.json"
+)
+TOP_PACKAGES_COUNT = 5000
 
 
 def _load_top_packages() -> Set[str]:
@@ -49,6 +58,60 @@ def _load_top_packages() -> Set[str]:
                 names.add(line.lower())
     _TOP_PACKAGES = names
     return _TOP_PACKAGES
+
+
+def refresh_top_packages(
+    url: str = TOP_PYPI_PACKAGES_URL,
+    count: int = TOP_PACKAGES_COUNT,
+    timeout: float = 30.0,
+) -> int:
+    """Fetch the latest top-packages list from *url* and update the bundled file.
+
+    Returns the number of package names written.
+
+    Raises
+    ------
+    httpx.HTTPError
+        On network/HTTP failures.
+    ValueError
+        If the response cannot be parsed.
+    """
+    global _TOP_PACKAGES
+
+    with httpx.Client(timeout=timeout, verify=True) as client:
+        resp = client.get(url, follow_redirects=True)
+    resp.raise_for_status()
+
+    data = resp.json()
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("Unexpected JSON structure: missing 'rows' list")
+
+    names: list[str] = []
+    for row in rows[:count]:
+        project = row.get("project")
+        if isinstance(project, str) and project.strip():
+            names.append(project.strip().lower())
+
+    if not names:
+        raise ValueError("No package names found in response")
+
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    header = (
+        f"# Top {len(names)} PyPI packages for typosquatting detection.\n"
+        f"# Source: {url}\n"
+        f"# Last updated: {now}\n"
+        "# One package name per line, lowercase.\n"
+    )
+    path = _DATA_DIR / "top_packages.txt"
+    path.write_text(header + "\n".join(names) + "\n", encoding="utf-8")
+
+    # Invalidate in-memory cache so next _load_top_packages() re-reads
+    _TOP_PACKAGES = None
+
+    logger.info("Updated top-packages list: %d packages written", len(names))
+    return len(names)
 
 
 # ---------------------------------------------------------------------------

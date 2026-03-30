@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.16 — Security Fix
+
+- **Fixed**: Static typosquatting list goes stale (OWASP A04:2021 — Insecure Design). Added `alterks update-db` command to dynamically refresh the bundled top-5000 PyPI packages list from [hugovk.github.io/top-pypi-packages](https://hugovk.github.io/top-pypi-packages/). Fetches with TLS verification, writes a timestamped file, and invalidates the in-memory cache so subsequent scans use fresh data.
+
 ### v0.1.15 — Security Fix
 
 - **Fixed**: Truncated SHA-256 cache key inviting birthday-attack collisions (OWASP A08:2021 — Software and Data Integrity Failures). Cache filenames now use the full 64-character SHA-256 hex digest instead of a 16-character truncation, eliminating practical collision risk.

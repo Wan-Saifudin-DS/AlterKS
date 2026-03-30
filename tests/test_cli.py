@@ -446,3 +446,22 @@ class TestGenerateConstraints:
         assert result.exit_code == 0
         assert out.is_file()
         assert "evil!=0.1" in out.read_text()
+
+
+# ---------------------------------------------------------------------------
+# alterks update-db
+# ---------------------------------------------------------------------------
+
+class TestUpdateDB:
+    @patch("alterks.heuristics.refresh_top_packages", return_value=5000)
+    def test_update_db_success(self, mock_refresh, runner):
+        result = runner.invoke(main, ["update-db"])
+        assert result.exit_code == 0
+        assert "5000" in result.output
+        mock_refresh.assert_called_once()
+
+    @patch("alterks.heuristics.refresh_top_packages", side_effect=RuntimeError("network down"))
+    def test_update_db_error(self, mock_refresh, runner):
+        result = runner.invoke(main, ["update-db"])
+        assert result.exit_code == 1
+        assert "network down" in result.output

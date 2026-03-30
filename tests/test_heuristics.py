@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
+import respx
 
 from alterks.config import AlterKSConfig, DEFAULT_HEURISTIC_WEIGHTS
 from alterks.heuristics import (
+    TOP_PYPI_PACKAGES_URL,
     _levenshtein,
     _score_maintainer_count,
     _score_metadata_quality,
@@ -16,6 +21,7 @@ from alterks.heuristics import (
     _score_release_pattern,
     _typosquat_score,
     compute_risk,
+    refresh_top_packages,
 )
 from alterks.models import PackageRisk, RiskFactor
 from alterks.sources.pypi import PyPIMetadata, ReleaseInfo
@@ -312,3 +318,110 @@ class TestComputeRisk:
         )
         risk = compute_risk("pkg", "1.0.0", meta, config=config)
         assert risk.risk_score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# refresh_top_packages
+# ---------------------------------------------------------------------------
+
+SAMPLE_TOP_RESPONSE = {
+    "last_update": "2026-03-30T10:00:00",
+    "rows": [
+        {"project": "boto3", "download_count": 999_999},
+        {"project": "requests", "download_count": 888_888},
+        {"project": "numpy", "download_count": 777_777},
+    ],
+}
+
+
+class TestRefreshTopPackages:
+    @respx.mock
+    def test_fetches_and_writes(self, tmp_path: Path):
+        """refresh_top_packages writes a valid top_packages.txt."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(200, json=SAMPLE_TOP_RESPONSE)
+        )
+        with patch("alterks.heuristics._DATA_DIR", tmp_path):
+            count = refresh_top_packages()
+
+        assert count == 3
+        txt = (tmp_path / "top_packages.txt").read_text(encoding="utf-8")
+        assert "boto3" in txt
+        assert "requests" in txt
+        assert "numpy" in txt
+        assert "Last updated:" in txt
+
+    @respx.mock
+    def test_invalidates_in_memory_cache(self, tmp_path: Path):
+        """After refresh, the in-memory cache should be cleared."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(200, json=SAMPLE_TOP_RESPONSE)
+        )
+        import alterks.heuristics as h
+
+        h._TOP_PACKAGES = {"old-cached-pkg"}
+        with patch("alterks.heuristics._DATA_DIR", tmp_path):
+            refresh_top_packages()
+        assert h._TOP_PACKAGES is None
+
+    @respx.mock
+    def test_http_error_raises(self):
+        """Network errors should propagate as httpx.HTTPStatusError."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(500)
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            refresh_top_packages()
+
+    @respx.mock
+    def test_bad_json_structure_raises(self, tmp_path: Path):
+        """Missing 'rows' key should raise ValueError."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(200, json={"unexpected": True})
+        )
+        with patch("alterks.heuristics._DATA_DIR", tmp_path):
+            with pytest.raises(ValueError, match="missing 'rows'"):
+                refresh_top_packages()
+
+    @respx.mock
+    def test_empty_rows_raises(self, tmp_path: Path):
+        """Empty rows list should raise ValueError."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(200, json={"rows": []})
+        )
+        with patch("alterks.heuristics._DATA_DIR", tmp_path):
+            with pytest.raises(ValueError, match="No package names"):
+                refresh_top_packages()
+
+    @respx.mock
+    def test_respects_count_limit(self, tmp_path: Path):
+        """Only the first N packages should be written."""
+        many_rows = [{"project": f"pkg-{i}"} for i in range(100)]
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(200, json={"rows": many_rows})
+        )
+        with patch("alterks.heuristics._DATA_DIR", tmp_path):
+            count = refresh_top_packages(count=10)
+        assert count == 10
+
+    @respx.mock
+    def test_uses_verify_true(self, tmp_path: Path):
+        """HTTP client must use verify=True for TLS."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(200, json=SAMPLE_TOP_RESPONSE)
+        )
+        import unittest.mock as _m
+
+        original_cls = httpx.Client
+        captured = {}
+
+        class SpyClient(original_cls):
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                super().__init__(**kwargs)
+
+        with _m.patch("alterks.heuristics.httpx.Client", SpyClient):
+            with patch("alterks.heuristics._DATA_DIR", tmp_path):
+                refresh_top_packages()
+
+        assert captured.get("verify") is True

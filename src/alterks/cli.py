@@ -540,3 +540,29 @@ def generate_constraints(ctx: click.Context, output: Optional[Path]) -> None:
         console.print(f"Constraints written to {output}")
     else:
         click.echo(text)
+
+
+# ---------------------------------------------------------------------------
+# update-db
+# ---------------------------------------------------------------------------
+
+@main.command("update-db")
+@click.pass_context
+def update_db(ctx: click.Context) -> None:
+    """Refresh the bundled top-packages list used for typosquatting detection.
+
+    Fetches the latest top-5000 PyPI packages from
+    hugovk.github.io/top-pypi-packages and updates the local database.
+    """
+    console: Console = ctx.obj["console"]
+
+    from alterks.heuristics import refresh_top_packages
+
+    console.print("Fetching latest top-packages list…", style="bold")
+    try:
+        count = refresh_top_packages()
+    except Exception as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(1) from exc
+
+    console.print(f"[green]Updated:[/green] {count} packages written.")
