@@ -153,7 +153,7 @@ class TestResolveAndScan:
 
         assert result is None
 
-    @patch("alterks.pip_hook.compute_risk", side_effect=RuntimeError("oops"))
+    @patch("alterks.pip_hook.compute_risk", side_effect=ValueError("oops"))
     @patch("alterks.pip_hook.Scanner")
     @patch("alterks.pip_hook.PyPIClient")
     def test_heuristic_failure_still_returns(self, mock_pypi_cls, mock_scanner_cls, mock_risk):

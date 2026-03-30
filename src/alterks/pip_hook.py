@@ -64,7 +64,7 @@ def resolve_and_scan(
     try:
         risk = compute_risk(name, version, metadata, config)
         result.risk = risk
-    except Exception as exc:
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         logger.warning("Heuristic scoring failed for %s: %s", name, exc)
 
     return result

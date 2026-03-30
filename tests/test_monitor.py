@@ -26,6 +26,7 @@ from alterks.monitor import (
     run_monitor,
     validate_webhook_url,
 )
+from alterks.sources.osv import OSVError
 from tests.helpers import make_scan_result, make_vulnerability
 
 
@@ -647,7 +648,7 @@ class TestRunMonitor:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise RuntimeError("API down")
+                raise OSVError("API down")
             return [_make_result("ok", "1.0")]
 
         scanner.scan_environment.side_effect = side_effect
@@ -676,7 +677,7 @@ class TestRunMonitor:
     def test_scan_failure_once_mode_returns(self):
         """In once mode, a scan failure should return immediately."""
         scanner = MagicMock()
-        scanner.scan_environment.side_effect = RuntimeError("API down")
+        scanner.scan_environment.side_effect = OSVError("API down")
 
         console = Console(file=None, stderr=True, force_terminal=False)
 

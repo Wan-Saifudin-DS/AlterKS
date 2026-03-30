@@ -11,6 +11,7 @@ import pytest
 from alterks.config import AlterKSConfig
 from alterks.models import PolicyAction, ScanResult, Severity, Vulnerability
 from alterks.scanner import Scanner, _extract_pinned_version, _parse_requirements_file
+from alterks.sources.osv import OSVError
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +106,7 @@ class TestScanPackage:
 
     def test_osv_error_falls_back_to_allow(self):
         osv = _mock_osv_client()
-        osv.query_package.side_effect = RuntimeError("network error")
+        osv.query_package.side_effect = OSVError("network error")
         scanner = Scanner(config=_make_config(), osv_client=osv)
 
         result = scanner.scan_package("oops", "1.0.0")
@@ -115,7 +116,7 @@ class TestScanPackage:
 
     def test_osv_error_with_fail_closed_returns_alert(self):
         osv = _mock_osv_client()
-        osv.query_package.side_effect = RuntimeError("network error")
+        osv.query_package.side_effect = OSVError("network error")
         config = _make_config(fail_closed=True)
         scanner = Scanner(config=config, osv_client=osv)
 
@@ -199,7 +200,7 @@ class TestScanEnvironment:
     def test_batch_osv_error_fail_open(self):
         fake_pkgs = [("requests", "2.31.0")]
         osv = _mock_osv_client()
-        osv.query_batch.side_effect = RuntimeError("API down")
+        osv.query_batch.side_effect = OSVError("API down")
         scanner = Scanner(config=_make_config(), osv_client=osv)
 
         with patch("alterks.scanner._get_installed_packages", return_value=fake_pkgs):
@@ -211,7 +212,7 @@ class TestScanEnvironment:
     def test_batch_osv_error_fail_closed(self):
         fake_pkgs = [("requests", "2.31.0"), ("flask", "2.3.3")]
         osv = _mock_osv_client()
-        osv.query_batch.side_effect = RuntimeError("API down")
+        osv.query_batch.side_effect = OSVError("API down")
         config = _make_config(fail_closed=True)
         scanner = Scanner(config=config, osv_client=osv)
 

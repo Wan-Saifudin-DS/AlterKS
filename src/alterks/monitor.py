@@ -31,6 +31,7 @@ from rich.console import Console
 from alterks.config import AlterKSConfig, load_config
 from alterks.models import PolicyAction, ScanResult
 from alterks.scanner import Scanner
+from alterks.sources.osv import OSVError
 
 logger = logging.getLogger(__name__)
 
@@ -382,7 +383,7 @@ def run_monitor(
 
         try:
             results = scanner.scan_environment()
-        except Exception as exc:
+        except (OSError, httpx.HTTPError, OSVError) as exc:
             logger.error("Monitor scan failed: %s", exc)
             console.print(f"[red]Scan failed: {exc}[/red]")
             if once:

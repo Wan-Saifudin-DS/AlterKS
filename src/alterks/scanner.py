@@ -14,11 +14,12 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from packaging.requirements import Requirement
+import httpx
+from packaging.requirements import InvalidRequirement, Requirement
 
 from alterks.config import AlterKSConfig, load_config
 from alterks.models import PolicyAction, ScanResult, Severity, Vulnerability
-from alterks.sources.osv import OSVClient
+from alterks.sources.osv import OSVClient, OSVError
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class Scanner:
         # Query OSV for vulnerabilities
         try:
             vulns = self.osv.query_package(name, version)
-        except Exception as exc:
+        except (OSVError, httpx.HTTPError) as exc:
             logger.error("OSV query failed for %s==%s: %s", name, version, exc)
             if self.config.fail_closed:
                 return ScanResult(
@@ -153,7 +154,7 @@ class Scanner:
         # Batch query OSV
         try:
             batch_vulns = self.osv.query_batch(to_query)
-        except Exception as exc:
+        except (OSVError, httpx.HTTPError) as exc:
             logger.error("OSV batch query failed: %s", exc)
             if self.config.fail_closed:
                 for name, version in to_query:
@@ -256,7 +257,7 @@ def _parse_requirements_file(path: Path) -> List[Tuple[str, str]]:
 
         try:
             req = Requirement(line)
-        except Exception:
+        except (InvalidRequirement, ValueError):
             logger.warning("Could not parse requirement line: %s", raw_line.strip())
             continue
 
