@@ -309,7 +309,7 @@ class QuarantineManager:
         # Clean up quarantine venv
         venv_path = Path(entry.venv_path)
         if venv_path.exists():
-            _remove_dir(venv_path)
+            _remove_dir(venv_path, self.quarantine_dir)
 
         # Remove from manifest
         del manifest[key]
@@ -332,7 +332,7 @@ class QuarantineManager:
         _validate_manifest_entry(data, self.quarantine_dir)
         venv_path = Path(data.get("venv_path", ""))
         if venv_path.exists():
-            _remove_dir(venv_path)
+            _remove_dir(venv_path, self.quarantine_dir)
 
         del manifest[key]
         _save_manifest(manifest, self.manifest_path)
@@ -378,10 +378,23 @@ class QuarantineManager:
             raise
 
 
-def _remove_dir(path: Path) -> None:
-    """Recursively remove a directory tree."""
+def _remove_dir(path: Path, quarantine_dir: Path) -> None:
+    """Recursively remove a directory tree, with path containment check.
+
+    Raises ``ValueError`` if *path* does not resolve to a location inside
+    *quarantine_dir*, preventing arbitrary directory deletion from a
+    tampered manifest.
+    """
     import shutil
+
+    resolved = path.resolve()
+    qdir = quarantine_dir.resolve()
+    if not resolved.is_relative_to(qdir):
+        raise ValueError(
+            f"Refusing to delete {path}: resolved path {resolved} "
+            f"is outside quarantine directory {qdir}"
+        )
     try:
-        shutil.rmtree(path)
+        shutil.rmtree(resolved)
     except OSError as exc:
         logger.warning("Failed to remove %s: %s", path, exc)

@@ -18,6 +18,7 @@ from alterks.quarantine import (
     QuarantineManager,
     _load_manifest,
     _normalise_name,
+    _remove_dir,
     _save_manifest,
     _validate_manifest_entry,
 )
@@ -511,3 +512,72 @@ class TestManifestValidationIntegration:
         mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
         with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
             mgr.remove_quarantined("flask")
+
+
+# ---------------------------------------------------------------------------
+# _remove_dir path containment
+# ---------------------------------------------------------------------------
+
+class TestRemoveDirContainment:
+    """Tests for _remove_dir path containment check."""
+
+    def test_removes_dir_inside_quarantine(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        target = qdir / "flask"
+        target.mkdir(parents=True)
+        (target / "marker.txt").write_text("exists")
+
+        _remove_dir(target, qdir)
+        assert not target.exists()
+
+    def test_refuses_path_outside_quarantine(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        qdir.mkdir()
+        outside = tmp_path / "important_data"
+        outside.mkdir()
+        (outside / "precious.txt").write_text("do not delete")
+
+        with pytest.raises(ValueError, match="outside quarantine directory"):
+            _remove_dir(outside, qdir)
+
+        # Must NOT have been deleted
+        assert outside.exists()
+        assert (outside / "precious.txt").read_text() == "do not delete"
+
+    def test_refuses_root_path(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        qdir.mkdir()
+
+        with pytest.raises(ValueError, match="outside quarantine directory"):
+            _remove_dir(Path("/"), qdir)
+
+    def test_refuses_parent_traversal(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        qdir.mkdir()
+        target = qdir / ".." / ".."
+
+        with pytest.raises(ValueError, match="outside quarantine directory"):
+            _remove_dir(target, qdir)
+
+    def test_refuses_sibling_directory(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        qdir.mkdir()
+        sibling = tmp_path / "other_project"
+        sibling.mkdir()
+
+        with pytest.raises(ValueError, match="outside quarantine directory"):
+            _remove_dir(sibling, qdir)
+
+    def test_release_does_not_delete_outside_quarantine(self, tmp_path: Path):
+        """Integration: release_quarantined blocks deletion of paths outside quarantine_dir."""
+        # Even if _validate_manifest_entry somehow passed, _remove_dir is the last line of defence.
+        # This tests _remove_dir directly with a path that resolves outside.
+        qdir = tmp_path / "quarantine"
+        outside = tmp_path / "system_files"
+        outside.mkdir(parents=True)
+        (outside / "important.conf").write_text("critical")
+
+        with pytest.raises(ValueError, match="outside quarantine directory"):
+            _remove_dir(outside, qdir)
+
+        assert (outside / "important.conf").read_text() == "critical"
