@@ -280,6 +280,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.10 — Security Fix
+
+- **Fixed**: Sensitive data sent to unverified webhook (OWASP A02:2021 — Cryptographic Failures). Webhook payloads are now signed with HMAC-SHA256 when a `webhook_secret` is configured (via config file or `--webhook-secret` CLI flag). The `X-AlterKS-Signature` header is included with each POST. Warnings are logged when sending over plain HTTP or without a secret.
+
 ### v0.1.9 — Security Fix
 
 - **Fixed**: TOCTOU race condition in quarantine manifest operations (OWASP A04:2021 — Insecure Design). Manifest writes are now atomic via temp file + `os.replace()`. All read-modify-write operations are protected by a cross-platform file lock (`fcntl`/`msvcrt`), preventing concurrent data loss.

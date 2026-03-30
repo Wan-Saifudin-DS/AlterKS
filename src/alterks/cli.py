@@ -478,6 +478,12 @@ def report(ctx: click.Context, output_format: str, output: Optional[Path]) -> No
     default=None,
     help="POST scan reports to this webhook URL.",
 )
+@click.option(
+    "--webhook-secret",
+    type=str,
+    default=None,
+    help="Shared secret for HMAC-SHA256 webhook payload signing.",
+)
 @click.pass_context
 def monitor(
     ctx: click.Context,
@@ -485,6 +491,7 @@ def monitor(
     once: bool,
     json_output: Optional[Path],
     webhook_url: Optional[str],
+    webhook_secret: Optional[str],
 ) -> None:
     """Start continuous monitoring of installed packages.
 
@@ -503,6 +510,7 @@ def monitor(
         console=console,
         json_output=json_output,
         webhook_url=webhook_url,
+        webhook_secret=webhook_secret,
     )
 
 

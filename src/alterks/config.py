@@ -55,6 +55,7 @@ class AlterKSConfig:
     blocklist: list[str] = field(default_factory=list)
     heuristic_weights: Dict[str, float] = field(default_factory=dict)
     fail_closed: bool = False
+    webhook_secret: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.severity_actions:
@@ -160,6 +161,7 @@ def _build_config(raw: Dict[str, Any]) -> AlterKSConfig:
         blocklist=blocklist,
         heuristic_weights=heuristic_weights,
         fail_closed=bool(raw.get("fail_closed", False)),
+        webhook_secret=raw.get("webhook_secret") or None,
     )
 
 

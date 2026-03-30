@@ -15,6 +15,7 @@ from alterks.models import PolicyAction, ScanResult, Severity, Vulnerability
 from alterks.monitor import (
     WebhookURLError,
     _build_report,
+    _compute_webhook_signature,
     _issue_key,
     _result_to_dict,
     collect_keys,
@@ -205,7 +206,8 @@ class TestNotifyWebhook:
         assert result is True
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args
-        assert call_kwargs.kwargs["json"] == {"test": True}
+        body = json.loads(call_kwargs.kwargs["content"])
+        assert body == {"test": True}
 
     @patch("alterks.monitor.httpx.post")
     def test_failed_post(self, mock_post):
@@ -225,6 +227,124 @@ class TestNotifyWebhook:
 
         result = notify_webhook({"test": True}, "https://example.com/hook")
         assert result is False
+
+    @patch("alterks.monitor.httpx.post")
+    def test_hmac_signature_sent_with_secret(self, mock_post):
+        """When webhook_secret is provided, X-AlterKS-Signature header is set."""
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        result = notify_webhook(
+            {"data": "value"},
+            "https://example.com/hook",
+            webhook_secret="my-secret-key",
+        )
+
+        assert result is True
+        call_kwargs = mock_post.call_args
+        headers = call_kwargs.kwargs["headers"]
+        assert "X-AlterKS-Signature" in headers
+        sig = headers["X-AlterKS-Signature"]
+        assert sig.startswith("sha256=")
+        # Verify the signature matches the body
+        body_bytes = call_kwargs.kwargs["content"]
+        expected = _compute_webhook_signature(body_bytes, "my-secret-key")
+        assert sig == expected
+
+    @patch("alterks.monitor.httpx.post")
+    def test_no_signature_without_secret(self, mock_post):
+        """Without webhook_secret, no signature header is sent."""
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        notify_webhook({"data": "value"}, "https://example.com/hook")
+
+        call_kwargs = mock_post.call_args
+        headers = call_kwargs.kwargs["headers"]
+        assert "X-AlterKS-Signature" not in headers
+
+    @patch("alterks.monitor.httpx.post")
+    def test_http_localhost_warns(self, mock_post, caplog):
+        """HTTP localhost should succeed but log a warning about plain HTTP."""
+        import logging
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        with caplog.at_level(logging.WARNING, logger="alterks.monitor"):
+            notify_webhook({"x": 1}, "http://localhost:8080/hook")
+
+        assert any("plain HTTP" in msg for msg in caplog.messages)
+
+    @patch("alterks.monitor.httpx.post")
+    def test_no_secret_warns(self, mock_post, caplog):
+        """When no secret is configured, a warning is logged."""
+        import logging
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        with caplog.at_level(logging.WARNING, logger="alterks.monitor"):
+            notify_webhook({"x": 1}, "https://example.com/hook")
+
+        assert any("No webhook secret" in msg for msg in caplog.messages)
+
+    @patch("alterks.monitor.httpx.post")
+    def test_secret_suppresses_unsigned_warning(self, mock_post, caplog):
+        """When a secret IS configured, the 'no secret' warning is absent."""
+        import logging
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        with caplog.at_level(logging.WARNING, logger="alterks.monitor"):
+            notify_webhook(
+                {"x": 1}, "https://example.com/hook",
+                webhook_secret="s3cret",
+            )
+
+        assert not any("No webhook secret" in msg for msg in caplog.messages)
+
+
+# ---------------------------------------------------------------------------
+# _compute_webhook_signature
+# ---------------------------------------------------------------------------
+
+class TestComputeWebhookSignature:
+    def test_deterministic(self):
+        payload = b'{"hello":"world"}'
+        sig1 = _compute_webhook_signature(payload, "key")
+        sig2 = _compute_webhook_signature(payload, "key")
+        assert sig1 == sig2
+        assert sig1.startswith("sha256=")
+
+    def test_different_keys_produce_different_signatures(self):
+        payload = b'{"hello":"world"}'
+        sig_a = _compute_webhook_signature(payload, "key-a")
+        sig_b = _compute_webhook_signature(payload, "key-b")
+        assert sig_a != sig_b
+
+    def test_different_payloads_produce_different_signatures(self):
+        sig1 = _compute_webhook_signature(b'{"a":1}', "key")
+        sig2 = _compute_webhook_signature(b'{"a":2}', "key")
+        assert sig1 != sig2
+
+    def test_known_vector(self):
+        """Verify against a hand-computed HMAC-SHA256 value."""
+        import hashlib
+        import hmac
+
+        payload = b"test-body"
+        secret = "test-secret"
+        expected_hex = hmac.new(
+            secret.encode("utf-8"), payload, hashlib.sha256,
+        ).hexdigest()
+        assert _compute_webhook_signature(payload, secret) == f"sha256={expected_hex}"
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +506,47 @@ class TestRunMonitor:
         mock_webhook.assert_called_once()
         report = mock_webhook.call_args.args[0]
         assert report["total_issues"] == 1
+
+    @patch("alterks.monitor.notify_webhook")
+    def test_webhook_secret_passed_from_cli(self, mock_webhook):
+        """webhook_secret kwarg from CLI is forwarded to notify_webhook."""
+        mock_webhook.return_value = True
+        scanner = self._make_scanner([
+            _make_result("bad", "1.0", PolicyAction.BLOCK, "vuln"),
+        ])
+        console = Console(file=None, stderr=True, force_terminal=False)
+
+        run_monitor(
+            config=AlterKSConfig(),
+            once=True,
+            console=console,
+            scanner=scanner,
+            webhook_url="https://example.com/hook",
+            webhook_secret="cli-secret",
+        )
+
+        mock_webhook.assert_called_once()
+        assert mock_webhook.call_args.kwargs["webhook_secret"] == "cli-secret"
+
+    @patch("alterks.monitor.notify_webhook")
+    def test_webhook_secret_from_config(self, mock_webhook):
+        """webhook_secret from config is used when CLI doesn't provide one."""
+        mock_webhook.return_value = True
+        scanner = self._make_scanner([
+            _make_result("bad", "1.0", PolicyAction.BLOCK, "vuln"),
+        ])
+        console = Console(file=None, stderr=True, force_terminal=False)
+
+        run_monitor(
+            config=AlterKSConfig(webhook_secret="config-secret"),
+            once=True,
+            console=console,
+            scanner=scanner,
+            webhook_url="https://example.com/hook",
+        )
+
+        mock_webhook.assert_called_once()
+        assert mock_webhook.call_args.kwargs["webhook_secret"] == "config-secret"
 
     def test_loop_runs_twice_then_stops(self):
         """Verify the loop rescans after sleeping."""

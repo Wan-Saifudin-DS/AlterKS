@@ -14,6 +14,8 @@ Features
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -199,15 +201,27 @@ def validate_webhook_url(url: str) -> str:
     return url
 
 
+def _compute_webhook_signature(payload_bytes: bytes, secret: str) -> str:
+    """Compute HMAC-SHA256 signature for a webhook payload.
+
+    Returns the hex digest prefixed with ``sha256=``.
+    """
+    mac = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256)
+    return f"sha256={mac.hexdigest()}"
+
+
 def notify_webhook(
     report: Dict[str, Any],
     webhook_url: str,
     *,
     timeout: float = 30.0,
+    webhook_secret: Optional[str] = None,
 ) -> bool:
     """POST the report payload to a webhook URL.
 
     Validates the URL for SSRF safety before sending.
+    When *webhook_secret* is provided, adds an ``X-AlterKS-Signature``
+    header containing an HMAC-SHA256 hex digest of the JSON body.
     Returns True on success (2xx), False otherwise.
     Safe: never raises — errors are logged.
     """
@@ -217,12 +231,39 @@ def notify_webhook(
         logger.error("Webhook URL rejected: %s", exc)
         return False
 
+    # Warn about insecure transport (HTTP even for localhost)
+    parsed = urlparse(webhook_url)
+    if (parsed.scheme or "").lower() == "http":
+        logger.warning(
+            "Webhook URL uses plain HTTP (%s). "
+            "Sensitive vulnerability data may be exposed in transit. "
+            "Use HTTPS in production.",
+            webhook_url,
+        )
+
+    # Warn if no HMAC secret is configured
+    if not webhook_secret:
+        logger.warning(
+            "No webhook secret configured. "
+            "Payload will be sent without HMAC signature. "
+            "Set webhook_secret in config or --webhook-secret on the CLI "
+            "to authenticate payloads."
+        )
+
     try:
+        payload_bytes = json.dumps(report, default=str, separators=(",", ":")).encode("utf-8")
+
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if webhook_secret:
+            headers["X-AlterKS-Signature"] = _compute_webhook_signature(
+                payload_bytes, webhook_secret,
+            )
+
         resp = httpx.post(
             webhook_url,
-            json=report,
+            content=payload_bytes,
             timeout=timeout,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         if resp.is_success:
             logger.info("Webhook notification sent to %s", webhook_url)
@@ -289,6 +330,7 @@ def run_monitor(
     console: Optional[Console] = None,
     json_output: Optional[Path] = None,
     webhook_url: Optional[str] = None,
+    webhook_secret: Optional[str] = None,
     scanner: Optional[Scanner] = None,
     _sleep_fn: Any = None,
 ) -> None:
@@ -308,6 +350,9 @@ def run_monitor(
         Path to write JSON-lines reports.  ``None`` disables file output.
     webhook_url:
         URL to POST report payloads.  ``None`` disables webhook.
+    webhook_secret:
+        Shared secret for HMAC-SHA256 webhook payload signing.
+        Falls back to ``config.webhook_secret`` when *None*.
     scanner:
         Pre-built :class:`Scanner`.  Useful for testing.
     _sleep_fn:
@@ -317,6 +362,9 @@ def run_monitor(
     console = console or Console(stderr=True)
     scanner = scanner or Scanner(config=config)
     sleep = _sleep_fn or time.sleep
+
+    # Resolve webhook secret: CLI flag > config file
+    effective_secret = webhook_secret or config.webhook_secret
 
     # Validate webhook URL eagerly so the user gets immediate feedback
     if webhook_url is not None:
@@ -359,7 +407,7 @@ def run_monitor(
         # 3. Webhook (if configured)
         if webhook_url is not None:
             report = _build_report(results, new_issues, timestamp)
-            notify_webhook(report, webhook_url)
+            notify_webhook(report, webhook_url, webhook_secret=effective_secret)
 
         if once:
             return
