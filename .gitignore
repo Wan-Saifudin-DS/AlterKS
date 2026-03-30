@@ -34,6 +34,7 @@ desktop.ini
 
 # Project
 AlterKS-plan.md
+AlterKS-Security-Audit-*.md
 
 # Build artifacts
 *.dist-info/

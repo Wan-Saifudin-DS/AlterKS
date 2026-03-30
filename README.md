@@ -278,6 +278,20 @@ src/alterks/
     └── top_packages.txt # Bundled top-5,000 PyPI package names (typosquatting)
 ```
 
+## Changelog
+
+### v0.1.2 — Security Fix
+
+- **Fixed**: Pip argument injection via unsanitised package name/version in subprocess calls (OWASP A03:2021 — Injection). All subprocess-based pip invocations now validate inputs against a strict regex and use `--` to separate options from arguments.
+
+### v0.1.1
+
+- Removed Contributing section from package metadata.
+
+### v0.1.0
+
+- Initial release.
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.

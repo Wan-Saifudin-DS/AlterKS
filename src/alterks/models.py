@@ -3,9 +3,49 @@
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+# PEP 508 / PyPI: package names consist of ASCII letters, digits, -, _, .
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
+# Version: digits, dots, pre/post/dev markers, local — no spaces or flags
+_SAFE_VERSION_RE = re.compile(
+    r"^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?$"
+)
+
+
+def validate_package_name(name: str) -> str:
+    """Validate and return *name*, or raise ``ValueError``.
+
+    Rejects strings that could be interpreted as command-line flags or
+    contain shell metacharacters.
+    """
+    if not name or not _SAFE_NAME_RE.match(name):
+        raise ValueError(
+            f"Invalid package name: {name!r}. "
+            "Names must contain only ASCII letters, digits, '.', '-', or '_'."
+        )
+    return name
+
+
+def validate_package_version(version: str) -> str:
+    """Validate and return *version*, or raise ``ValueError``.
+
+    Rejects strings that could be interpreted as command-line flags or
+    contain shell metacharacters.
+    """
+    if not version or not _SAFE_VERSION_RE.match(version):
+        raise ValueError(
+            f"Invalid package version: {version!r}. "
+            "Versions must contain only ASCII letters, digits, '.', '-', '+', or '_'."
+        )
+    return version
 
 
 class PolicyAction(enum.Enum):

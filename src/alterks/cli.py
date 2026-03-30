@@ -276,9 +276,12 @@ def install(ctx: click.Context, package: str, dry_run: bool) -> None:
         return
 
     # Proceed with pip install
+    from alterks.models import validate_package_name, validate_package_version
+    validate_package_name(result.name)
+    validate_package_version(result.version)
     console.print(f"Installing {result.name}=={result.version}…")
     ret = subprocess.call(
-        [sys.executable, "-m", "pip", "install", f"{result.name}=={result.version}"],
+        [sys.executable, "-m", "pip", "install", "--", f"{result.name}=={result.version}"],
     )
     ctx.exit(ret)
 

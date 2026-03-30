@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from alterks.models import validate_package_name, validate_package_version
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUARANTINE_DIR = Path.home() / ".alterks" / "quarantine"
@@ -115,6 +117,10 @@ class QuarantineManager:
         Creates a fresh virtual environment, installs the package there,
         and records an entry in the manifest.
         """
+        # Validate inputs before any subprocess usage
+        validate_package_name(name)
+        validate_package_version(version)
+
         key = _normalise_name(name)
         venv_path = self.quarantine_dir / key
 
@@ -184,9 +190,11 @@ class QuarantineManager:
 
         # Install into the current environment
         logger.info("Releasing %s==%s into current environment", entry.name, entry.version)
+        validate_package_name(entry.name)
+        validate_package_version(entry.version)
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", f"{entry.name}=={entry.version}"],
+                [sys.executable, "-m", "pip", "install", "--", f"{entry.name}=={entry.version}"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -244,11 +252,13 @@ class QuarantineManager:
     @staticmethod
     def _install_package(pip_exe: Path, name: str, version: str) -> None:
         """Install a package into a quarantine venv via pip."""
+        validate_package_name(name)
+        validate_package_version(version)
         cmd: list[str]
         if pip_exe.name.startswith("python"):
-            cmd = [str(pip_exe), "-m", "pip", "install", f"{name}=={version}"]
+            cmd = [str(pip_exe), "-m", "pip", "install", "--", f"{name}=={version}"]
         else:
-            cmd = [str(pip_exe), "install", f"{name}=={version}"]
+            cmd = [str(pip_exe), "install", "--", f"{name}=={version}"]
 
         try:
             subprocess.check_call(
