@@ -278,17 +278,6 @@ src/alterks/
     └── top_packages.txt # Bundled top-5,000 PyPI package names (typosquatting)
 ```
 
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/my-feature`)
-3. Run the test suite (`pytest tests/`)
-4. Commit your changes (`git commit -am 'Add my feature'`)
-5. Push to the branch (`git push origin feature/my-feature`)
-6. Open a Pull Request
-
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
