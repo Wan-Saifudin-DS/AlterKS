@@ -26,6 +26,10 @@ DEFAULT_QUARANTINE_DIR = Path.home() / ".alterks" / "quarantine"
 DEFAULT_MANIFEST_PATH = Path.home() / ".alterks" / "quarantine.json"
 
 
+class QuarantineReleaseBlocked(Exception):
+    """Raised when a quarantined package still fails its re-scan on release."""
+
+
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
@@ -173,11 +177,19 @@ class QuarantineManager:
         except TypeError:
             return None
 
-    def release_quarantined(self, name: str) -> bool:
+    def release_quarantined(self, name: str, *, force: bool = False) -> bool:
         """Release a quarantined package — install it into the current env.
+
+        Before installing, the package is re-scanned for vulnerabilities.
+        If it still has issues the release is refused unless *force* is True.
 
         Removes the quarantine venv and manifest entry.  Returns True if
         the package was found and released, False otherwise.
+
+        Raises
+        ------
+        QuarantineReleaseBlocked
+            When the re-scan still flags the package and *force* is False.
         """
         key = _normalise_name(name)
         manifest = _load_manifest(self.manifest_path)
@@ -187,6 +199,26 @@ class QuarantineManager:
             return False
 
         entry = QuarantineEntry(**data)
+
+        # --- Re-scan before releasing ---
+        from alterks.config import load_config
+        from alterks.models import PolicyAction
+        from alterks.scanner import Scanner
+
+        config = load_config()
+        scanner = Scanner(config=config)
+        result = scanner.scan_package(entry.name, entry.version)
+
+        if result.action in (PolicyAction.BLOCK, PolicyAction.QUARANTINE):
+            if not force:
+                raise QuarantineReleaseBlocked(
+                    f"{entry.name}=={entry.version} still flagged "
+                    f"({result.action.value}): {result.reason}"
+                )
+            logger.warning(
+                "Force-releasing %s==%s despite scan result: %s",
+                entry.name, entry.version, result.reason,
+            )
 
         # Install into the current environment
         logger.info("Releasing %s==%s into current environment", entry.name, entry.version)

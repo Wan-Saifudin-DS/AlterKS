@@ -280,6 +280,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.3 — Security Fix
+
+- **Fixed**: Quarantine release now re-scans the package before installing into the main environment (OWASP A04:2021 — Insecure Design). If the package is still flagged, release is blocked unless `--force` is used.
+
 ### v0.1.2 — Security Fix
 
 - **Fixed**: Pip argument injection via unsanitised package name/version in subprocess calls (OWASP A03:2021 — Injection). All subprocess-based pip invocations now validate inputs against a strict regex and use `--` to separate options from arguments.

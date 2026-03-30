@@ -352,15 +352,29 @@ def quarantine_inspect(ctx: click.Context, name: str) -> None:
 
 @quarantine.command("release")
 @click.argument("name")
+@click.option("--force", is_flag=True, help="Release even if re-scan still flags the package.")
 @click.pass_context
-def quarantine_release(ctx: click.Context, name: str) -> None:
-    """Release a quarantined package into the current environment."""
+def quarantine_release(ctx: click.Context, name: str, force: bool) -> None:
+    """Release a quarantined package into the current environment.
+
+    Before installing, the package is re-scanned for vulnerabilities.
+    Use --force to override if it is still flagged.
+    """
+    from alterks.quarantine import QuarantineReleaseBlocked
+
     console: Console = ctx.obj["console"]
     qm = QuarantineManager()
-    if qm.release_quarantined(name):
-        console.print(f"Released [bold]{name}[/bold] into current environment.", style="green")
-    else:
-        console.print(f"Package '{name}' not found in quarantine.", style="red")
+    try:
+        if qm.release_quarantined(name, force=force):
+            console.print(f"Released [bold]{name}[/bold] into current environment.", style="green")
+        else:
+            console.print(f"Package '{name}' not found in quarantine.", style="red")
+            ctx.exit(1)
+    except QuarantineReleaseBlocked as exc:
+        console.print(
+            f"[bold red]BLOCKED[/bold red]: {exc}\n"
+            "Use [bold]--force[/bold] to override.",
+        )
         ctx.exit(1)
 
 

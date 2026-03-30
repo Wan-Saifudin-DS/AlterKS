@@ -204,8 +204,16 @@ class TestInspectQuarantined:
 # ---------------------------------------------------------------------------
 
 class TestReleaseQuarantined:
+    @patch("alterks.scanner.Scanner")
     @patch("alterks.quarantine.subprocess.check_call")
-    def test_release_installs_and_cleans(self, mock_pip, tmp_path: Path):
+    def test_release_installs_and_cleans(self, mock_pip, mock_scanner_cls, tmp_path: Path):
+        # Mock scanner to return ALLOW (package is now safe)
+        from alterks.models import PolicyAction, ScanResult
+        mock_scanner = mock_scanner_cls.return_value
+        mock_scanner.scan_package.return_value = ScanResult(
+            name="flask", version="2.3.3", action=PolicyAction.ALLOW,
+        )
+
         # Set up a quarantine dir that exists
         venv_dir = tmp_path / "quarantine" / "flask"
         venv_dir.mkdir(parents=True)
@@ -227,12 +235,82 @@ class TestReleaseQuarantined:
         result = mgr.release_quarantined("flask")
 
         assert result is True
+        mock_scanner.scan_package.assert_called_once_with("flask", "2.3.3")
         mock_pip.assert_called_once()
         # Venv cleaned up
         assert not venv_dir.exists()
         # Removed from manifest
         data = json.loads(manifest.read_text())
         assert "flask" not in data
+
+    @patch("alterks.scanner.Scanner")
+    def test_release_blocked_when_still_flagged(self, mock_scanner_cls, tmp_path: Path):
+        """Re-scan flags the package → release is refused."""
+        from alterks.models import PolicyAction, ScanResult
+        from alterks.quarantine import QuarantineReleaseBlocked
+
+        mock_scanner = mock_scanner_cls.return_value
+        mock_scanner.scan_package.return_value = ScanResult(
+            name="evil-pkg", version="1.0", action=PolicyAction.BLOCK,
+            reason="still vulnerable",
+        )
+
+        manifest = tmp_path / "q.json"
+        manifest.write_text(json.dumps({
+            "evil-pkg": {
+                "name": "evil-pkg", "version": "1.0", "reason": "malicious",
+                "venv_path": str(tmp_path / "q" / "evil-pkg"),
+                "quarantined_at": "2026-01-01",
+                "vulnerability_ids": ["CVE-2026-0001"], "risk_score": 90.0,
+            },
+        }))
+
+        mgr = QuarantineManager(
+            quarantine_dir=tmp_path / "q",
+            manifest_path=manifest,
+        )
+
+        with pytest.raises(QuarantineReleaseBlocked, match="still flagged"):
+            mgr.release_quarantined("evil-pkg")
+
+        # Package must remain in manifest
+        data = json.loads(manifest.read_text())
+        assert "evil-pkg" in data
+
+    @patch("alterks.scanner.Scanner")
+    @patch("alterks.quarantine.subprocess.check_call")
+    def test_release_force_overrides_block(self, mock_pip, mock_scanner_cls, tmp_path: Path):
+        """With force=True, release succeeds even when re-scan flags the package."""
+        from alterks.models import PolicyAction, ScanResult
+
+        mock_scanner = mock_scanner_cls.return_value
+        mock_scanner.scan_package.return_value = ScanResult(
+            name="risky-pkg", version="1.0", action=PolicyAction.BLOCK,
+            reason="still vulnerable",
+        )
+
+        venv_dir = tmp_path / "q" / "risky-pkg"
+        venv_dir.mkdir(parents=True)
+
+        manifest = tmp_path / "q.json"
+        manifest.write_text(json.dumps({
+            "risky-pkg": {
+                "name": "risky-pkg", "version": "1.0", "reason": "sus",
+                "venv_path": str(venv_dir), "quarantined_at": "2026-01-01",
+                "vulnerability_ids": [], "risk_score": 70.0,
+            },
+        }))
+
+        mgr = QuarantineManager(
+            quarantine_dir=tmp_path / "q",
+            manifest_path=manifest,
+        )
+        result = mgr.release_quarantined("risky-pkg", force=True)
+
+        assert result is True
+        mock_pip.assert_called_once()
+        data = json.loads(manifest.read_text())
+        assert "risky-pkg" not in data
 
     def test_release_not_found(self, tmp_path: Path):
         mgr = QuarantineManager(
