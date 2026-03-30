@@ -2,7 +2,8 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/alterks)](https://pypi.org/project/alterks/)
 [![Python](https://img.shields.io/pypi/pyversions/alterks)](https://pypi.org/project/alterks/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-orange)](https://buymeacoffee.com/wansaifudin)
 [![Tests](https://github.com/Wan-Saifudin-DS/AlterKS/actions/workflows/tests.yml/badge.svg)](https://github.com/Wan-Saifudin-DS/AlterKS/actions)
 
 **Python package scanner, monitor, and supply chain attack mitigation tool.**
@@ -331,4 +332,8 @@ src/alterks/
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+GPL-3.0-only — see [LICENSE](LICENSE) for details.
+
+## Support
+
+If you appreciate this project, you can support its development through [Buy me a Coffee](https://buymeacoffee.com/wansaifudin).
