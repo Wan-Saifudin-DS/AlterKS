@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.20 — Security Fix
+
+- **Fixed**: DNS rebinding bypass in webhook SSRF validation (A10:2021 — SSRF). `validate_webhook_url()` now resolves hostnames to IP addresses via `socket.getaddrinfo()` and validates **all** resolved addresses against private, loopback, link-local, reserved, and cloud metadata blocklists. Previously, DNS names passed through without resolution, allowing an attacker to configure a domain that initially resolves to a public IP but rebinds to an internal address at request time.
+
 ### v0.1.19 — Usability Fix
 
 - **Fixed**: `alterks monitor` termination producing an unhandled Python traceback instead of clean output. `KeyboardInterrupt` (Ctrl+C) is now caught gracefully, printing a "Monitor stopped by user" message and exiting cleanly.

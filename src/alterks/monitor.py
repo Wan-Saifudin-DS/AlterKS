@@ -19,6 +19,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -196,10 +197,48 @@ def validate_webhook_url(url: str) -> str:
                 "This is blocked to prevent SSRF."
             )
     except ValueError:
-        # hostname is a DNS name, not a literal IP — that's fine.
-        pass
+        # hostname is a DNS name — resolve it and check ALL resulting IPs
+        # to prevent DNS rebinding attacks.
+        _validate_resolved_ips(hostname)
 
     return url
+
+
+def _validate_resolved_ips(hostname: str) -> None:
+    """Resolve *hostname* via DNS and reject if any address is private/reserved.
+
+    This prevents DNS rebinding attacks where a domain initially resolves
+    to a public IP during validation but later rebinds to a private or
+    metadata IP at request time.
+
+    Raises :class:`WebhookURLError` if resolution fails or any address
+    is private, loopback, link-local, or reserved.
+    """
+    try:
+        # AF_UNSPEC → both IPv4 and IPv6 results
+        results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise WebhookURLError(
+            f"Could not resolve hostname '{hostname}': {exc}"
+        ) from exc
+
+    if not results:
+        raise WebhookURLError(
+            f"DNS resolution returned no addresses for '{hostname}'."
+        )
+
+    for family, _type, _proto, _canonname, sockaddr in results:
+        ip_str = sockaddr[0]
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise WebhookURLError(
+                f"Webhook URL hostname '{hostname}' resolves to "
+                f"private/reserved address {ip_str}. "
+                "This is blocked to prevent SSRF."
+            )
 
 
 def _compute_webhook_signature(payload_bytes: bytes, secret: str) -> str:

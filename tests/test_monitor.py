@@ -19,6 +19,7 @@ from alterks.monitor import (
     _compute_webhook_signature,
     _issue_key,
     _result_to_dict,
+    _validate_resolved_ips,
     collect_keys,
     diff_issues,
     notify_json_file,
@@ -368,7 +369,8 @@ class TestComputeWebhookSignature:
 class TestValidateWebhookUrl:
     """Tests for webhook URL validation against SSRF attacks."""
 
-    def test_https_allowed(self):
+    @patch("alterks.monitor.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 0))])
+    def test_https_allowed(self, mock_gai):
         assert validate_webhook_url("https://example.com/hook") == "https://example.com/hook"
 
     def test_http_localhost_allowed(self):
@@ -425,6 +427,78 @@ class TestValidateWebhookUrl:
         """notify_webhook returns False (no exception) for invalid URLs."""
         result = notify_webhook({"test": True}, "http://10.0.0.1/hook")
         assert result is False
+
+    # --- DNS rebinding / resolution tests -----------------------------------
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_resolving_to_private_ip_rejected(self, mock_gai):
+        """A hostname that resolves to a private IP must be blocked."""
+        mock_gai.return_value = [
+            (2, 1, 6, "", ("10.0.0.5", 0)),
+        ]
+        with pytest.raises(WebhookURLError, match="private/reserved"):
+            validate_webhook_url("https://evil.example.com/hook")
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_resolving_to_link_local_rejected(self, mock_gai):
+        """A hostname resolving to the AWS metadata IP (169.254.169.254)."""
+        mock_gai.return_value = [
+            (2, 1, 6, "", ("169.254.169.254", 0)),
+        ]
+        with pytest.raises(WebhookURLError, match="private/reserved"):
+            validate_webhook_url("https://sneaky.attacker.com/hook")
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_resolving_to_loopback_rejected(self, mock_gai):
+        """A hostname that resolves to 127.x.x.x must be blocked."""
+        mock_gai.return_value = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+        ]
+        with pytest.raises(WebhookURLError, match="private/reserved"):
+            validate_webhook_url("https://rebind.attacker.com/hook")
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_resolving_to_public_ip_allowed(self, mock_gai):
+        """A hostname resolving to a public IP should succeed."""
+        mock_gai.return_value = [
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ]
+        result = validate_webhook_url("https://example.com/hook")
+        assert result == "https://example.com/hook"
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_multiple_results_one_private_rejected(self, mock_gai):
+        """If ANY resolved IP is private, reject the URL."""
+        mock_gai.return_value = [
+            (2, 1, 6, "", ("93.184.216.34", 0)),   # public
+            (2, 1, 6, "", ("10.0.0.1", 0)),         # private
+        ]
+        with pytest.raises(WebhookURLError, match="private/reserved"):
+            validate_webhook_url("https://dual.example.com/hook")
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_resolution_failure_rejected(self, mock_gai):
+        """Unresolvable hostnames should be rejected."""
+        import socket as _socket
+        mock_gai.side_effect = _socket.gaierror("Name or service not known")
+        with pytest.raises(WebhookURLError, match="Could not resolve"):
+            validate_webhook_url("https://nonexistent.invalid/hook")
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_dns_empty_results_rejected(self, mock_gai):
+        """Empty DNS results should be rejected."""
+        mock_gai.return_value = []
+        with pytest.raises(WebhookURLError, match="no addresses"):
+            validate_webhook_url("https://empty.example.com/hook")
+
+    @patch("alterks.monitor.socket.getaddrinfo")
+    def test_validate_resolved_ips_directly(self, mock_gai):
+        """Direct test of _validate_resolved_ips helper."""
+        mock_gai.return_value = [
+            (10, 1, 6, "", ("::1", 0, 0, 0)),  # IPv6 loopback
+        ]
+        with pytest.raises(WebhookURLError, match="private/reserved"):
+            _validate_resolved_ips("rebind6.example.com")
 
 
 class TestRunMonitorWebhookValidation:
