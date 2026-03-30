@@ -280,6 +280,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.5 — Security Fix
+
+- **Fixed**: Quarantine manifest deserialization now validates all JSON keys, field types, package names/versions, and ensures `venv_path` is safely contained under the quarantine directory (OWASP A08:2021 — Software and Data Integrity Failures). Tampered manifests with unknown fields or path traversal payloads are rejected.
+
 ### v0.1.4 — Security Fix
 
 - **Fixed**: Webhook URL validation to prevent SSRF attacks (OWASP A10:2021 — SSRF). Rejects private/reserved IPs, cloud metadata endpoints, non-HTTPS URLs (except localhost), and dangerous schemes.

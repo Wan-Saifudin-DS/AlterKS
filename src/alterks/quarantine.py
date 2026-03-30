@@ -30,6 +30,74 @@ class QuarantineReleaseBlocked(Exception):
     """Raised when a quarantined package still fails its re-scan on release."""
 
 
+class ManifestValidationError(Exception):
+    """Raised when a quarantine manifest entry fails validation."""
+
+
+# ---------------------------------------------------------------------------
+# Manifest entry whitelist
+# ---------------------------------------------------------------------------
+
+_MANIFEST_ENTRY_FIELDS = frozenset({
+    "name", "version", "reason", "venv_path",
+    "quarantined_at", "vulnerability_ids", "risk_score",
+})
+
+
+def _validate_manifest_entry(data: dict, quarantine_dir: Path) -> dict:
+    """Validate a manifest entry dict before instantiation.
+
+    Raises :class:`ManifestValidationError` if *data* contains unknown
+    keys, invalid types, or a ``venv_path`` outside the quarantine
+    directory.
+    """
+    if not isinstance(data, dict):
+        raise ManifestValidationError("Entry is not a dict")
+
+    # Reject unexpected keys
+    unknown = set(data.keys()) - _MANIFEST_ENTRY_FIELDS
+    if unknown:
+        raise ManifestValidationError(f"Unknown keys in manifest entry: {unknown}")
+
+    # Required string fields
+    for key in ("name", "version", "reason", "venv_path"):
+        if key not in data or not isinstance(data[key], str):
+            raise ManifestValidationError(f"Missing or non-string field: {key!r}")
+
+    # Validate name and version against safe regexes
+    try:
+        validate_package_name(data["name"])
+        validate_package_version(data["version"])
+    except ValueError as exc:
+        raise ManifestValidationError(str(exc)) from exc
+
+    # Validate venv_path is safely contained under quarantine_dir
+    try:
+        venv = Path(data["venv_path"]).resolve()
+        qdir = quarantine_dir.resolve()
+        if not venv.is_relative_to(qdir):
+            raise ManifestValidationError(
+                f"venv_path {data['venv_path']!r} is outside quarantine dir"
+            )
+    except (OSError, ValueError) as exc:
+        raise ManifestValidationError(f"Invalid venv_path: {exc}") from exc
+
+    # Optional field type checks
+    if "quarantined_at" in data and not isinstance(data["quarantined_at"], str):
+        raise ManifestValidationError("quarantined_at must be a string")
+
+    if "vulnerability_ids" in data:
+        ids = data["vulnerability_ids"]
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise ManifestValidationError("vulnerability_ids must be a list of strings")
+
+    if "risk_score" in data:
+        if not isinstance(data["risk_score"], (int, float)):
+            raise ManifestValidationError("risk_score must be a number")
+
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
@@ -160,9 +228,10 @@ class QuarantineManager:
         entries: List[QuarantineEntry] = []
         for data in manifest.values():
             try:
+                _validate_manifest_entry(data, self.quarantine_dir)
                 entries.append(QuarantineEntry(**data))
-            except TypeError:
-                logger.warning("Skipping malformed quarantine entry: %s", data)
+            except (TypeError, ManifestValidationError) as exc:
+                logger.warning("Skipping malformed quarantine entry: %s — %s", data, exc)
         return entries
 
     def inspect_quarantined(self, name: str) -> Optional[QuarantineEntry]:
@@ -173,8 +242,10 @@ class QuarantineManager:
         if data is None:
             return None
         try:
+            _validate_manifest_entry(data, self.quarantine_dir)
             return QuarantineEntry(**data)
-        except TypeError:
+        except (TypeError, ManifestValidationError) as exc:
+            logger.warning("Malformed quarantine entry for %s: %s", name, exc)
             return None
 
     def release_quarantined(self, name: str, *, force: bool = False) -> bool:
@@ -198,6 +269,7 @@ class QuarantineManager:
             logger.warning("Package %s is not quarantined", name)
             return False
 
+        _validate_manifest_entry(data, self.quarantine_dir)
         entry = QuarantineEntry(**data)
 
         # --- Re-scan before releasing ---
@@ -257,6 +329,7 @@ class QuarantineManager:
             return False
 
         data = manifest[key]
+        _validate_manifest_entry(data, self.quarantine_dir)
         venv_path = Path(data.get("venv_path", ""))
         if venv_path.exists():
             _remove_dir(venv_path)

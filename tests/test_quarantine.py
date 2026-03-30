@@ -13,11 +13,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from alterks.quarantine import (
+    ManifestValidationError,
     QuarantineEntry,
     QuarantineManager,
     _load_manifest,
     _normalise_name,
     _save_manifest,
+    _validate_manifest_entry,
 )
 
 
@@ -350,3 +352,162 @@ class TestRemoveQuarantined:
             manifest_path=tmp_path / "q.json",
         )
         assert mgr.remove_quarantined("nope") is False
+
+
+# ---------------------------------------------------------------------------
+# _validate_manifest_entry
+# ---------------------------------------------------------------------------
+
+class TestValidateManifestEntry:
+    """Tests for quarantine manifest deserialization validation."""
+
+    def _valid_entry(self, tmp_path: Path) -> dict:
+        """Return a minimal valid manifest entry dict."""
+        return {
+            "name": "flask",
+            "version": "2.0",
+            "reason": "test",
+            "venv_path": str(tmp_path / "flask"),
+            "quarantined_at": "2026-01-01T00:00:00",
+            "vulnerability_ids": [],
+            "risk_score": 0.0,
+        }
+
+    def test_valid_entry_passes(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        result = _validate_manifest_entry(data, tmp_path)
+        assert result is data
+
+    def test_rejects_non_dict(self, tmp_path: Path):
+        with pytest.raises(ManifestValidationError, match="not a dict"):
+            _validate_manifest_entry("not a dict", tmp_path)
+
+    def test_rejects_unknown_keys(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["injected_field"] = "/etc/shadow"
+        with pytest.raises(ManifestValidationError, match="Unknown keys"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_missing_name(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        del data["name"]
+        with pytest.raises(ManifestValidationError, match="name"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_missing_version(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        del data["version"]
+        with pytest.raises(ManifestValidationError, match="version"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_missing_reason(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        del data["reason"]
+        with pytest.raises(ManifestValidationError, match="reason"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_missing_venv_path(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        del data["venv_path"]
+        with pytest.raises(ManifestValidationError, match="venv_path"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_non_string_name(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["name"] = 123
+        with pytest.raises(ManifestValidationError, match="name"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_malicious_package_name(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["name"] = "--index-url=https://evil.com"
+        with pytest.raises(ManifestValidationError, match="Invalid package name"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_malicious_version(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["version"] = "; rm -rf /"
+        with pytest.raises(ManifestValidationError, match="Invalid package version"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_venv_path_outside_quarantine(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["venv_path"] = "/"
+        with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_venv_path_traversal(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["venv_path"] = str(tmp_path / ".." / ".." / "etc")
+        with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_non_list_vulnerability_ids(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["vulnerability_ids"] = "CVE-2026-0001"
+        with pytest.raises(ManifestValidationError, match="vulnerability_ids"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_non_string_items_in_vulnerability_ids(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["vulnerability_ids"] = [123, 456]
+        with pytest.raises(ManifestValidationError, match="vulnerability_ids"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_non_numeric_risk_score(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["risk_score"] = "high"
+        with pytest.raises(ManifestValidationError, match="risk_score"):
+            _validate_manifest_entry(data, tmp_path)
+
+    def test_rejects_non_string_quarantined_at(self, tmp_path: Path):
+        data = self._valid_entry(tmp_path)
+        data["quarantined_at"] = 12345
+        with pytest.raises(ManifestValidationError, match="quarantined_at"):
+            _validate_manifest_entry(data, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Integration: validation blocks tampered manifests
+# ---------------------------------------------------------------------------
+
+class TestManifestValidationIntegration:
+    """Ensure tampered manifests are rejected by manager methods."""
+
+    def _tampered_manifest(self, tmp_path: Path, **overrides) -> Path:
+        """Write a manifest with one entry, applying overrides."""
+        entry = {
+            "name": "flask",
+            "version": "2.0",
+            "reason": "vuln",
+            "venv_path": str(tmp_path / "q" / "flask"),
+            "quarantined_at": "2026-01-01T00:00:00",
+            "vulnerability_ids": [],
+            "risk_score": 0.0,
+        }
+        entry.update(overrides)
+        manifest = tmp_path / "q.json"
+        manifest.write_text(json.dumps({"flask": entry}))
+        return manifest
+
+    def test_list_skips_entry_with_unknown_keys(self, tmp_path: Path):
+        manifest = self._tampered_manifest(tmp_path, evil_field="pwned")
+        mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
+        assert mgr.list_quarantined() == []
+
+    def test_inspect_returns_none_for_tampered_entry(self, tmp_path: Path):
+        manifest = self._tampered_manifest(tmp_path, venv_path="/")
+        mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
+        assert mgr.inspect_quarantined("flask") is None
+
+    def test_release_rejects_tampered_venv_path(self, tmp_path: Path):
+        manifest = self._tampered_manifest(tmp_path, venv_path="/tmp/evil")
+        mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
+        with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
+            mgr.release_quarantined("flask")
+
+    def test_remove_rejects_tampered_venv_path(self, tmp_path: Path):
+        manifest = self._tampered_manifest(tmp_path, venv_path="/")
+        mgr = QuarantineManager(quarantine_dir=tmp_path / "q", manifest_path=manifest)
+        with pytest.raises(ManifestValidationError, match="outside quarantine dir"):
+            mgr.remove_quarantined("flask")
