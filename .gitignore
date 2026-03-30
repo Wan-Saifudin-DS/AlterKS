@@ -32,5 +32,8 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
+# Project
+AlterKS-plan.md
+
 # Build artifacts
 *.dist-info/
