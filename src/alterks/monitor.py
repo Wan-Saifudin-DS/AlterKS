@@ -250,6 +250,25 @@ def _compute_webhook_signature(payload_bytes: bytes, secret: str) -> str:
     return f"sha256={mac.hexdigest()}"
 
 
+def _sanitize_url(url: str) -> str:
+    """Strip credentials (userinfo) from a URL for safe logging.
+
+    ``https://user:token@hooks.example.com/notify``
+    becomes ``https://***@hooks.example.com/notify``.
+
+    If the URL has no credentials, it is returned unchanged.
+    """
+    parsed = urlparse(url)
+    if not parsed.username and not parsed.password:
+        return url
+    # Rebuild netloc without credentials
+    host_port = parsed.hostname or ""
+    if parsed.port:
+        host_port = f"{host_port}:{parsed.port}"
+    safe_netloc = f"***@{host_port}"
+    return parsed._replace(netloc=safe_netloc).geturl()
+
+
 def notify_webhook(
     report: Dict[str, Any],
     webhook_url: str,
@@ -278,7 +297,7 @@ def notify_webhook(
             "Webhook URL uses plain HTTP (%s). "
             "Sensitive vulnerability data may be exposed in transit. "
             "Use HTTPS in production.",
-            webhook_url,
+            _sanitize_url(webhook_url),
         )
 
     # Warn if no HMAC secret is configured
@@ -307,7 +326,7 @@ def notify_webhook(
             verify=True,
         )
         if resp.is_success:
-            logger.info("Webhook notification sent to %s", webhook_url)
+            logger.info("Webhook notification sent to %s", _sanitize_url(webhook_url))
             return True
         logger.warning(
             "Webhook returned HTTP %d: %s", resp.status_code, resp.text[:200]

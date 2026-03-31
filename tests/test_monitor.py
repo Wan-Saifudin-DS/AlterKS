@@ -19,6 +19,7 @@ from alterks.monitor import (
     _compute_webhook_signature,
     _issue_key,
     _result_to_dict,
+    _sanitize_url,
     _validate_resolved_ips,
     collect_keys,
     diff_issues,
@@ -636,6 +637,69 @@ class TestRunMonitor:
         mock_webhook.assert_called_once()
         assert mock_webhook.call_args.kwargs["webhook_secret"] == "config-secret"
 
+
+# ---------------------------------------------------------------------------
+# _sanitize_url — credential stripping
+# ---------------------------------------------------------------------------
+
+class TestSanitizeUrl:
+    def test_no_credentials_unchanged(self):
+        url = "https://hooks.example.com/notify"
+        assert _sanitize_url(url) == url
+
+    def test_strips_user_and_password(self):
+        url = "https://user:token@hooks.example.com/notify"
+        sanitized = _sanitize_url(url)
+        assert "user" not in sanitized
+        assert "token" not in sanitized
+        assert "***@hooks.example.com" in sanitized
+        assert sanitized.startswith("https://")
+        assert sanitized.endswith("/notify")
+
+    def test_strips_user_only(self):
+        url = "https://apikey@hooks.example.com:8443/path"
+        sanitized = _sanitize_url(url)
+        assert "apikey" not in sanitized
+        assert "***@hooks.example.com:8443" in sanitized
+
+    def test_preserves_port(self):
+        url = "https://user:pass@example.com:9090/webhook"
+        sanitized = _sanitize_url(url)
+        assert ":9090" in sanitized
+        assert "user" not in sanitized
+        assert "pass" not in sanitized
+
+    def test_preserves_path_and_query(self):
+        url = "https://user:secret@example.com/hook?channel=test"
+        sanitized = _sanitize_url(url)
+        assert "secret" not in sanitized
+        assert "/hook?channel=test" in sanitized
+
+    @patch("alterks.monitor.httpx.post")
+    @patch("alterks.monitor.validate_webhook_url")
+    def test_notify_webhook_does_not_log_credentials(self, mock_validate, mock_post, caplog):
+        """notify_webhook must never log raw credentials."""
+        mock_validate.return_value = None
+        mock_post.return_value = MagicMock(is_success=True)
+
+        import logging
+        with caplog.at_level(logging.DEBUG, logger="alterks.monitor"):
+            notify_webhook(
+                {"test": True},
+                "https://admin:s3cret@hooks.example.com/notify",
+            )
+
+        full_log = caplog.text
+        assert "s3cret" not in full_log
+        assert "admin" not in full_log
+        assert "***@hooks.example.com" in full_log
+
+
+# ---------------------------------------------------------------------------
+# Monitor loop behaviour
+# ---------------------------------------------------------------------------
+
+class TestMonitorLoop:
     def test_loop_runs_twice_then_stops(self):
         """Verify the loop rescans after sleeping."""
         call_count = 0

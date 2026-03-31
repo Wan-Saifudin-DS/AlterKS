@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.24 — Security Fix
+
+- **Fixed**: Webhook URL credentials leaking into log output (A09:2021 — Logging Failures). Added `_sanitize_url()` which strips userinfo (username/password) from URLs before logging, replacing them with `***@`. All `logger.info()` and `logger.warning()` calls that previously logged the raw `webhook_url` now use the sanitized form. A URL like `https://user:token@hooks.example.com/notify` is logged as `https://***@hooks.example.com/notify`.
+
 ### v0.1.23 — Bug Fix
 
 - **Fixed**: `asyncio.run()` crashing with `RuntimeError` when called from an existing event loop (e.g. Jupyter notebooks, FastAPI, pytest-asyncio). `OSVClient.query_package()` and `query_batch()` now use a `_run_sync()` helper that detects a running event loop via `asyncio.get_running_loop()` and falls back to executing the coroutine in a dedicated daemon thread with its own event loop, avoiding the "cannot be called from a running event loop" error.
