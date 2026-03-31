@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alterks"
-version = "0.1.24"
+version = "0.1.25"
 description = "ALTER KILL SWITCH — Python package scanner, monitor, and supply chain attack mitigation tool."
 readme = "README.md"
 license = "GPL-3.0-only"

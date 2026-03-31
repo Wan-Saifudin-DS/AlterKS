@@ -20,30 +20,30 @@ from alterks.quarantine import (
     _ManifestLock,
     _load_manifest,
     _manifest_key,
-    _normalise_name,
     _pid_is_alive,
     _remove_dir,
     _save_manifest,
     _validate_manifest_entry,
 )
+from alterks.models import normalise_name
 
 
 # ---------------------------------------------------------------------------
-# _normalise_name
+# normalise_name
 # ---------------------------------------------------------------------------
 
 class TestNormaliseName:
     def test_lowercase(self):
-        assert _normalise_name("Flask") == "flask"
+        assert normalise_name("Flask") == "flask"
 
     def test_underscores(self):
-        assert _normalise_name("my_package") == "my-package"
+        assert normalise_name("my_package") == "my-package"
 
     def test_dots(self):
-        assert _normalise_name("a.b.c") == "a-b-c"
+        assert normalise_name("a.b.c") == "a-b-c"
 
     def test_mixed(self):
-        assert _normalise_name("My_Cool.Package") == "my-cool-package"
+        assert normalise_name("My_Cool.Package") == "my-cool-package"
 
 
 # ---------------------------------------------------------------------------

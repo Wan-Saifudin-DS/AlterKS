@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.25 — Maintainability Fix
+
+- **Fixed**: Duplicate PEP 503 normalisation functions `config._normalise()` and `quarantine._normalise_name()` consolidated into a single `normalise_name()` in `models.py`. Both `config.py` and `quarantine.py` now import and use the shared function, eliminating the risk of the two implementations diverging and causing silent mismatches in allowlist/blocklist checks vs quarantine lookups.
+
 ### v0.1.24 — Security Fix
 
 - **Fixed**: Webhook URL credentials leaking into log output (A09:2021 — Logging Failures). Added `_sanitize_url()` which strips userinfo (username/password) from URLs before logging, replacing them with `***@`. All `logger.info()` and `logger.warning()` calls that previously logged the raw `webhook_url` now use the sanitized form. A URL like `https://user:token@hooks.example.com/notify` is logged as `https://***@hooks.example.com/notify`.

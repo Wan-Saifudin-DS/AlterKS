@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from alterks.models import validate_package_name, validate_package_version
+from alterks.models import validate_package_name, validate_package_version, normalise_name
 
 logger = logging.getLogger(__name__)
 
@@ -348,15 +348,9 @@ def _pid_is_alive(pid: int) -> bool:
             return True
 
 
-def _normalise_name(name: str) -> str:
-    """PEP 503 normalisation for quarantine keys."""
-    import re
-    return re.sub(r"[-_.]+", "-", name).lower()
-
-
 def _manifest_key(name: str, version: str) -> str:
     """Composite manifest key: ``normalised-name==version``."""
-    return f"{_normalise_name(name)}=={version}"
+    return f"{normalise_name(name)}=={version}"
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +396,7 @@ class QuarantineManager:
         validate_package_version(version)
 
         key = _manifest_key(name, version)
-        norm = _normalise_name(name)
+        norm = normalise_name(name)
         venv_path = self.quarantine_dir / f"{norm}_{version}"
 
         # Create isolated venv
@@ -465,11 +459,11 @@ class QuarantineManager:
                 return None
 
         # No version — find first entry matching the normalised name
-        norm = _normalise_name(name)
+        norm = normalise_name(name)
         for data in manifest.values():
             try:
                 _validate_manifest_entry(data, self.quarantine_dir)
-                if _normalise_name(data.get("name", "")) == norm:
+                if normalise_name(data.get("name", "")) == norm:
                     return QuarantineEntry(**data)
             except (TypeError, ManifestValidationError) as exc:
                 logger.warning("Malformed quarantine entry: %s", exc)
@@ -501,11 +495,11 @@ class QuarantineManager:
             else:
                 key = None
                 data = None
-                norm = _normalise_name(name)
+                norm = normalise_name(name)
                 for k, v in manifest.items():
                     try:
                         _validate_manifest_entry(v, self.quarantine_dir)
-                        if _normalise_name(v.get("name", "")) == norm:
+                        if normalise_name(v.get("name", "")) == norm:
                             key = k
                             data = v
                             break
@@ -580,11 +574,11 @@ class QuarantineManager:
                 key = _manifest_key(name, version)
             else:
                 key = None
-                norm = _normalise_name(name)
+                norm = normalise_name(name)
                 for k, v in manifest.items():
                     try:
                         _validate_manifest_entry(v, self.quarantine_dir)
-                        if _normalise_name(v.get("name", "")) == norm:
+                        if normalise_name(v.get("name", "")) == norm:
                             key = k
                             break
                     except (TypeError, ManifestValidationError):

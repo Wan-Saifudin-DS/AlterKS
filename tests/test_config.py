@@ -12,12 +12,11 @@ from alterks.config import (
     DEFAULT_RISK_THRESHOLD,
     DEFAULT_SEVERITY_ACTIONS,
     _build_config,
-    _normalise,
     _parse_severity_actions,
     _read_tool_section,
     load_config,
 )
-from alterks.models import PolicyAction, Severity
+from alterks.models import PolicyAction, Severity, normalise_name
 
 
 # ---------------------------------------------------------------------------
@@ -157,22 +156,22 @@ class TestBuildConfig:
 
 
 # ---------------------------------------------------------------------------
-# _normalise
+# normalise_name
 # ---------------------------------------------------------------------------
 
 
 class TestNormalise:
     def test_lowercase(self):
-        assert _normalise("Flask") == "flask"
+        assert normalise_name("Flask") == "flask"
 
     def test_underscores_to_dashes(self):
-        assert _normalise("my_cool_package") == "my-cool-package"
+        assert normalise_name("my_cool_package") == "my-cool-package"
 
     def test_dots_to_dashes(self):
-        assert _normalise("zope.interface") == "zope-interface"
+        assert normalise_name("zope.interface") == "zope-interface"
 
     def test_mixed(self):
-        assert _normalise("My_Cool.Package") == "my-cool-package"
+        assert normalise_name("My_Cool.Package") == "my-cool-package"
 
 
 # ---------------------------------------------------------------------------

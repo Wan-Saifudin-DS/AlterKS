@@ -19,7 +19,7 @@ else:
     except ModuleNotFoundError:
         import tomli as tomllib  # type: ignore[no-redef]
 
-from alterks.models import PolicyAction, Severity
+from alterks.models import PolicyAction, Severity, normalise_name
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -72,11 +72,11 @@ class AlterKSConfig:
 
     def is_allowed(self, package_name: str) -> bool:
         """Check if a package is unconditionally allowed."""
-        return _normalise(package_name) in {_normalise(p) for p in self.allowlist}
+        return normalise_name(package_name) in {normalise_name(p) for p in self.allowlist}
 
     def is_blocked(self, package_name: str) -> bool:
         """Check if a package is unconditionally blocked."""
-        return _normalise(package_name) in {_normalise(p) for p in self.blocklist}
+        return normalise_name(package_name) in {normalise_name(p) for p in self.blocklist}
 
     def exceeds_risk_threshold(self, risk_score: float) -> bool:
         """Return True if the risk score exceeds the configured threshold."""
@@ -177,9 +177,3 @@ def _parse_severity_actions(mapping: Dict[str, str]) -> Dict[Severity, PolicyAct
             action = PolicyAction.ALLOW
         result[severity] = action
     return result
-
-
-def _normalise(name: str) -> str:
-    """Normalise a PyPI package name for comparison (PEP 503)."""
-    import re
-    return re.sub(r"[-_.]+", "-", name).lower()

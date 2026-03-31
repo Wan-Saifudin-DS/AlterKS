@@ -48,6 +48,16 @@ def validate_package_version(version: str) -> str:
     return version
 
 
+def normalise_name(name: str) -> str:
+    """PEP 503 package-name normalisation.
+
+    Replaces runs of ``-``, ``_``, or ``.`` with a single ``-`` and
+    lowercases the result so that ``My_Package``, ``my.package``, and
+    ``my-package`` all compare equal.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 class PolicyAction(enum.Enum):
     """Action to take when a risky or vulnerable package is detected."""
 
