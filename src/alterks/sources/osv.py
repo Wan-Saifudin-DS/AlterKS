@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -27,6 +28,41 @@ OSV_BATCH_URL = f"{OSV_API_BASE}/v1/querybatch"
 DEFAULT_TIMEOUT = 30.0  # seconds
 MAX_RETRIES = 3
 BATCH_CHUNK_SIZE = 1000  # OSV recommends ≤1000 queries per batch
+
+
+def _run_sync(coro: Any) -> Any:
+    """Run an async coroutine from synchronous code.
+
+    If no event loop is running, uses ``asyncio.run()`` directly.
+    If an event loop is already running (e.g. Jupyter, FastAPI, pytest-asyncio),
+    schedules the coroutine on a **new** event loop in a dedicated daemon
+    thread to avoid ``RuntimeError("asyncio.run() cannot be called from a
+    running event loop")``.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No loop running — safe to use asyncio.run()
+        return asyncio.run(coro)
+
+    # An event loop is already running — execute in a background thread
+    result: Any = None
+    exception: BaseException | None = None
+
+    def _thread_target() -> None:
+        nonlocal result, exception
+        try:
+            result = asyncio.run(coro)
+        except BaseException as exc:
+            exception = exc
+
+    thread = threading.Thread(target=_thread_target, daemon=True)
+    thread.start()
+    thread.join()
+
+    if exception is not None:
+        raise exception
+    return result
 
 
 class OSVError(Exception):
@@ -69,7 +105,7 @@ class OSVClient:
         list[Vulnerability]
             Parsed vulnerability records. Empty list if no results.
         """
-        return asyncio.run(self.aquery_package(name, version))
+        return _run_sync(self.aquery_package(name, version))
 
     def query_batch(
         self, packages: Sequence[Tuple[str, str]]
@@ -87,7 +123,7 @@ class OSVClient:
             Mapping of each package to its vulnerabilities. Packages with no
             known vulnerabilities map to an empty list.
         """
-        return asyncio.run(self.aquery_batch(packages))
+        return _run_sync(self.aquery_batch(packages))
 
     # -- Async API -----------------------------------------------------------
 

@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.23 — Bug Fix
+
+- **Fixed**: `asyncio.run()` crashing with `RuntimeError` when called from an existing event loop (e.g. Jupyter notebooks, FastAPI, pytest-asyncio). `OSVClient.query_package()` and `query_batch()` now use a `_run_sync()` helper that detects a running event loop via `asyncio.get_running_loop()` and falls back to executing the coroutine in a dedicated daemon thread with its own event loop, avoiding the "cannot be called from a running event loop" error.
+
 ### v0.1.22 — Security Fix
 
 - **Fixed**: `_write_json_report()` concurrent write corruption (A04:2021 — Insecure Design). Report file appends are now protected by an exclusive file lock using `msvcrt.locking(LK_NBLCK)` on Windows and `fcntl.flock(LOCK_EX | LOCK_NB)` on Unix, with a non-blocking retry loop and 10-second timeout. Multiple concurrent `alterks install` or `execute_action` calls writing to the same report file can no longer interleave mid-line and corrupt JSON-lines output.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 import respx
@@ -15,6 +17,7 @@ from alterks.sources.osv import (
     _extract_fix_versions,
     _extract_severity,
     _parse_vulnerability,
+    _run_sync,
 )
 from tests.conftest import (
     BATCH_PAGE2_RESPONSE,
@@ -276,3 +279,60 @@ class TestTLSVerification:
             client.query_package("pkg", "1.0")
 
         assert captured.get("verify") is True
+
+
+# ---------------------------------------------------------------------------
+# _run_sync – event-loop safety
+# ---------------------------------------------------------------------------
+
+class TestRunSync:
+    """Verify _run_sync works both with and without a running event loop."""
+
+    def test_run_sync_no_loop(self):
+        """When no event loop is running, _run_sync should work normally."""
+        async def _coro():
+            return 42
+
+        assert _run_sync(_coro()) == 42
+
+    def test_run_sync_inside_running_loop(self):
+        """When called from inside a running event loop, _run_sync must not crash."""
+        async def _outer():
+            async def _inner():
+                return "ok"
+            return _run_sync(_inner())
+
+        result = asyncio.run(_outer())
+        assert result == "ok"
+
+    def test_run_sync_propagates_exception(self):
+        """Exceptions from the coroutine should propagate through _run_sync."""
+        async def _failing():
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError, match="boom"):
+            _run_sync(_failing())
+
+    def test_run_sync_exception_inside_running_loop(self):
+        """Exceptions should propagate even when called from a running loop."""
+        async def _outer():
+            async def _failing():
+                raise RuntimeError("fail")
+            return _run_sync(_failing())
+
+        with pytest.raises(RuntimeError, match="fail"):
+            asyncio.run(_outer())
+
+    @respx.mock
+    def test_query_package_inside_running_loop(self):
+        """OSVClient.query_package should work inside an existing event loop."""
+        respx.post(OSV_QUERY_URL).mock(
+            return_value=httpx.Response(200, json={"vulns": []})
+        )
+
+        async def _outer():
+            client = OSVClient(timeout=5, max_retries=1)
+            return client.query_package("pkg", "1.0")
+
+        result = asyncio.run(_outer())
+        assert result == []
