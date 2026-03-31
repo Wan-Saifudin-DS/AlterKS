@@ -326,6 +326,52 @@ class TestNotifyWebhook:
 
         assert not any("No webhook secret" in msg for msg in caplog.messages)
 
+    @patch("alterks.monitor.httpx.post")
+    def test_user_agent_header_sent(self, mock_post):
+        """Webhook POST must include a User-Agent header with the version."""
+        import alterks as _pkg
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        notify_webhook({"x": 1}, "https://example.com/hook")
+
+        headers = mock_post.call_args.kwargs["headers"]
+        assert "User-Agent" in headers
+        assert headers["User-Agent"] == f"AlterKS/{_pkg.__version__}"
+
+    @patch("alterks.monitor.httpx.post")
+    def test_x_request_id_header_sent(self, mock_post):
+        """Webhook POST must include a UUID-based X-Request-ID header."""
+        import uuid
+
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        notify_webhook({"x": 1}, "https://example.com/hook")
+
+        headers = mock_post.call_args.kwargs["headers"]
+        assert "X-Request-ID" in headers
+        # Must be a valid UUID
+        uuid.UUID(headers["X-Request-ID"])
+
+    @patch("alterks.monitor.httpx.post")
+    def test_x_request_id_unique_per_call(self, mock_post):
+        """Each webhook call should produce a unique X-Request-ID."""
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_post.return_value = mock_resp
+
+        notify_webhook({"a": 1}, "https://example.com/hook")
+        id1 = mock_post.call_args.kwargs["headers"]["X-Request-ID"]
+
+        notify_webhook({"b": 2}, "https://example.com/hook")
+        id2 = mock_post.call_args.kwargs["headers"]["X-Request-ID"]
+
+        assert id1 != id2
+
 
 # ---------------------------------------------------------------------------
 # _compute_webhook_signature

@@ -21,6 +21,7 @@ import json
 import logging
 import socket
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -33,6 +34,8 @@ from alterks.config import AlterKSConfig, load_config
 from alterks.models import PolicyAction, ScanResult
 from alterks.scanner import Scanner
 from alterks.sources.osv import OSVError
+
+import alterks as _alterks_pkg  # for __version__
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +315,11 @@ def notify_webhook(
     try:
         payload_bytes = json.dumps(report, default=str, separators=(",", ":")).encode("utf-8")
 
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "User-Agent": f"AlterKS/{_alterks_pkg.__version__}",
+            "X-Request-ID": str(uuid.uuid4()),
+        }
         if webhook_secret:
             headers["X-AlterKS-Signature"] = _compute_webhook_signature(
                 payload_bytes, webhook_secret,

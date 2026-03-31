@@ -281,6 +281,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.1.26 — Defence-in-Depth
+
+- **Fixed**: Webhook POST now includes `User-Agent: AlterKS/{version}` and a UUID-based `X-Request-ID` header for request correlation. Some webhook receivers (Slack, Discord, enterprise proxies) reject or deprioritise requests without a recognisable User-Agent. The `X-Request-ID` aids debugging delivery issues across distributed systems.
+
 ### v0.1.25 — Maintainability Fix
 
 - **Fixed**: Duplicate PEP 503 normalisation functions `config._normalise()` and `quarantine._normalise_name()` consolidated into a single `normalise_name()` in `models.py`. Both `config.py` and `quarantine.py` now import and use the shared function, eliminating the risk of the two implementations diverging and causing silent mismatches in allowlist/blocklist checks vs quarantine lookups.
