@@ -54,6 +54,7 @@ Supply chain attacks on PyPI are increasing — typosquatting, dependency confus
 - **Quarantine management** — isolate risky packages in separate virtual environments
 - **Constraint generation** — output pip constraint files to block known-bad versions
 - **Policy-driven** — configure everything via `[tool.alterks]` in `pyproject.toml`
+- **Cross-platform** — tested on Linux and Windows via CI matrix (Python 3.9–3.12)
 
 ## Installation
 
@@ -258,6 +259,8 @@ pytest tests/
 ruff check src/ tests/
 ```
 
+CI runs on both **Ubuntu** and **Windows** across Python 3.9 and 3.12.
+
 ## Project Structure
 
 ```
@@ -280,6 +283,10 @@ src/alterks/
 ```
 
 ## Changelog
+
+### v0.1.27 — Cross-Platform CI
+
+- **Added**: Windows CI test matrix. GitHub Actions now runs the full test suite on both `ubuntu-latest` and `windows-latest` across Python 3.9 and 3.12 (4 matrix jobs, `fail-fast: false`). Ensures cross-platform compatibility is validated on every push and pull request.
 
 ### v0.1.26 — Defence-in-Depth
 
