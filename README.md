@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.6 — PEP 561 py.typed Marker
+
+- **Added**: `py.typed` marker file for PEP 561 compliance. Static type checkers (mypy, pyright, etc.) in downstream projects will now discover AlterKS’s type annotations automatically when the package is installed.
+
 ### v0.2.5 — HTTP Redirect Limit for Top-Packages Fetch
 
 - **Fixed**: No explicit redirect limit for HTTP ops resolving top-packages (A04:2021 — Insecure Design). `refresh_top_packages()` now sets `max_redirects=5` on the `httpx.Client`, preventing a malicious or misconfigured server from stalling the client with an unbounded redirect chain. Raises `httpx.TooManyRedirects` if the limit is exceeded.
