@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.4 — Webhook Secret Environment Variable Support
+
+- **Fixed**: `webhook_secret` may be stored in plaintext in `pyproject.toml` (A07:2021 — Identification Failures). The webhook HMAC secret is now resolved with priority: (1) `ALTERKS_WEBHOOK_SECRET` environment variable, (2) `webhook_secret` in `[tool.alterks]`. When the secret is found in the config file rather than the environment, a warning is emitted advising the user to use the environment variable instead, since `pyproject.toml` is typically committed to version control.
+
 ### v0.2.3 — Restrictive File Permissions on State Files
 
 - **Fixed**: Inconsistent file permissions on state files (A01:2021 — Broken Access Control). All directories created under `~/.alterks` (reports, quarantine, locks) now enforce owner-only permissions (`0o700`) on Unix via `chmod(stat.S_IRWXU)`. Lock files created with `os.open()` now specify mode `0o600` (owner read/write only). The PyPI cache directory was already correctly restricted; this extends the same discipline to report output files, quarantine directories, manifest locks, and monitor JSON-lines output. Windows systems are unaffected (NTFS uses ACLs, not POSIX permissions).

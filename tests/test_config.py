@@ -11,9 +11,11 @@ from alterks.config import (
     DEFAULT_HEURISTIC_WEIGHTS,
     DEFAULT_RISK_THRESHOLD,
     DEFAULT_SEVERITY_ACTIONS,
+    _WEBHOOK_SECRET_ENV_VAR,
     _build_config,
     _parse_severity_actions,
     _read_tool_section,
+    _resolve_webhook_secret,
     load_config,
 )
 from alterks.models import PolicyAction, Severity, normalise_name
@@ -261,3 +263,47 @@ class TestLoadConfig:
         cfg = load_config(pyproject_path=toml)
         assert cfg.heuristic_weights["typosquatting"] == 0.80
         assert cfg.heuristic_weights["package_age"] == 0.20
+
+
+# ---------------------------------------------------------------------------
+# _resolve_webhook_secret
+# ---------------------------------------------------------------------------
+
+
+class TestResolveWebhookSecret:
+    def test_env_var_preferred_over_file(self, monkeypatch):
+        monkeypatch.setenv(_WEBHOOK_SECRET_ENV_VAR, "env-secret")
+        result = _resolve_webhook_secret({"webhook_secret": "file-secret"})
+        assert result == "env-secret"
+
+    def test_env_var_only(self, monkeypatch):
+        monkeypatch.setenv(_WEBHOOK_SECRET_ENV_VAR, "env-only")
+        result = _resolve_webhook_secret({})
+        assert result == "env-only"
+
+    def test_file_secret_with_warning(self, monkeypatch, caplog):
+        monkeypatch.delenv(_WEBHOOK_SECRET_ENV_VAR, raising=False)
+        import logging
+        with caplog.at_level(logging.WARNING, logger="alterks.config"):
+            result = _resolve_webhook_secret({"webhook_secret": "file-secret"})
+        assert result == "file-secret"
+        assert "pyproject.toml" in caplog.text
+        assert _WEBHOOK_SECRET_ENV_VAR in caplog.text
+
+    def test_no_secret_returns_none(self, monkeypatch):
+        monkeypatch.delenv(_WEBHOOK_SECRET_ENV_VAR, raising=False)
+        result = _resolve_webhook_secret({})
+        assert result is None
+
+    def test_build_config_uses_env_var(self, monkeypatch):
+        monkeypatch.setenv(_WEBHOOK_SECRET_ENV_VAR, "from-env")
+        cfg = _build_config({})
+        assert cfg.webhook_secret == "from-env"
+
+    def test_build_config_file_secret_warns(self, monkeypatch, caplog):
+        monkeypatch.delenv(_WEBHOOK_SECRET_ENV_VAR, raising=False)
+        import logging
+        with caplog.at_level(logging.WARNING, logger="alterks.config"):
+            cfg = _build_config({"webhook_secret": "plaintext"})
+        assert cfg.webhook_secret == "plaintext"
+        assert "pyproject.toml" in caplog.text

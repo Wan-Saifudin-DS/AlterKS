@@ -6,6 +6,8 @@ Reads ``[tool.alterks]`` from a project's ``pyproject.toml`` and produces an
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +22,10 @@ else:
         import tomli as tomllib  # type: ignore[no-redef]
 
 from alterks.models import PolicyAction, Severity, normalise_name
+
+logger = logging.getLogger(__name__)
+
+_WEBHOOK_SECRET_ENV_VAR = "ALTERKS_WEBHOOK_SECRET"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -162,8 +168,37 @@ def _build_config(raw: Dict[str, Any]) -> AlterKSConfig:
         blocklist=blocklist,
         heuristic_weights=heuristic_weights,
         fail_closed=bool(raw.get("fail_closed", False)),
-        webhook_secret=raw.get("webhook_secret") or None,
+        webhook_secret=_resolve_webhook_secret(raw),
     )
+
+
+def _resolve_webhook_secret(raw: Dict[str, Any]) -> Optional[str]:
+    """Resolve the webhook secret, preferring the environment variable.
+
+    Priority:
+    1. ``ALTERKS_WEBHOOK_SECRET`` environment variable
+    2. ``webhook_secret`` in ``[tool.alterks]`` (with a warning)
+
+    If the secret is found in the config file (pyproject.toml) rather
+    than the environment, a warning is emitted encouraging the user
+    to use the environment variable instead.
+    """
+    env_secret = os.environ.get(_WEBHOOK_SECRET_ENV_VAR)
+    if env_secret:
+        return env_secret
+
+    file_secret = raw.get("webhook_secret")
+    if file_secret:
+        logger.warning(
+            "webhook_secret is set in pyproject.toml [tool.alterks]. "
+            "This file is typically committed to version control, which "
+            "risks exposing the secret. Use the %s environment variable "
+            "instead.",
+            _WEBHOOK_SECRET_ENV_VAR,
+        )
+        return str(file_secret)
+
+    return None
 
 
 def _parse_severity_actions(mapping: Dict[str, str]) -> Dict[Severity, PolicyAction]:
