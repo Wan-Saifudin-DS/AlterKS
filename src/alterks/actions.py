@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import sys
 import time
 from datetime import datetime, timezone
@@ -240,6 +241,15 @@ _REPORT_LOCK_TIMEOUT: float = 10.0  # seconds
 _REPORT_LOCK_RETRY: float = 0.1     # seconds between retries
 
 
+def _secure_dir(path: Path) -> None:
+    """Set owner-only permissions on a directory (best-effort, Unix only)."""
+    if os.name != "nt":
+        try:
+            path.chmod(stat.S_IRWXU)  # 0o700
+        except OSError:
+            pass
+
+
 def _write_json_report(action_result: ActionResult, path: Path) -> None:
     """Append an action result to a JSON-lines report file.
 
@@ -249,6 +259,7 @@ def _write_json_report(action_result: ActionResult, path: Path) -> None:
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_dir(path.parent)
         line = json.dumps(action_result.to_dict()) + "\n"
         lock_path = path.with_suffix(path.suffix + ".lock")
         _locked_append(path, lock_path, line)
@@ -258,7 +269,7 @@ def _write_json_report(action_result: ActionResult, path: Path) -> None:
 
 def _locked_append(path: Path, lock_path: Path, data: str) -> None:
     """Append *data* to *path* while holding an exclusive file lock."""
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         _acquire_report_lock(fd, lock_path)
         try:

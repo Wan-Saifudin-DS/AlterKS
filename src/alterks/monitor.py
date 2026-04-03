@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import socket
+import stat
 import sys
 import time
 import uuid
@@ -91,6 +92,15 @@ _REPORT_LOCK_TIMEOUT: float = 10.0  # seconds
 _REPORT_LOCK_RETRY: float = 0.1     # seconds between retries
 
 
+def _secure_dir(path: Path) -> None:
+    """Set owner-only permissions on a directory (best-effort, Unix only)."""
+    if os.name != "nt":
+        try:
+            path.chmod(stat.S_IRWXU)  # 0o700
+        except OSError:
+            pass
+
+
 def _acquire_monitor_lock(fd: int, lock_path: Path) -> None:
     """Non-blocking lock acquisition with timeout."""
     deadline = time.monotonic() + _REPORT_LOCK_TIMEOUT
@@ -127,7 +137,7 @@ def _release_monitor_lock(fd: int) -> None:
 
 def _locked_append(path: Path, lock_path: Path, data: str) -> None:
     """Append *data* to *path* while holding an exclusive file lock."""
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         _acquire_monitor_lock(fd, lock_path)
         try:
@@ -152,6 +162,7 @@ def notify_json_file(
     """
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_dir(output_path.parent)
         line = json.dumps(report, default=str) + "\n"
         lock_path = output_path.with_suffix(output_path.suffix + ".lock")
         _locked_append(output_path, lock_path, line)

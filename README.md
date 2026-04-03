@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.3 — Restrictive File Permissions on State Files
+
+- **Fixed**: Inconsistent file permissions on state files (A01:2021 — Broken Access Control). All directories created under `~/.alterks` (reports, quarantine, locks) now enforce owner-only permissions (`0o700`) on Unix via `chmod(stat.S_IRWXU)`. Lock files created with `os.open()` now specify mode `0o600` (owner read/write only). The PyPI cache directory was already correctly restricted; this extends the same discipline to report output files, quarantine directories, manifest locks, and monitor JSON-lines output. Windows systems are unaffected (NTFS uses ACLs, not POSIX permissions).
+
 ### v0.2.2 — Specific Exception Handling in update-db
 
 - **Fixed**: Broad `except Exception` in `update-db` command (A09:2021 — Logging Failures). The `update-db` command now catches only `httpx.HTTPError`, `ValueError`, and `OSError` — the specific exceptions that `refresh_top_packages()` can raise. Internal bugs (`TypeError`, `AttributeError`, etc.) are no longer silently masked behind a generic "Error" message and will propagate with full tracebacks for debugging.

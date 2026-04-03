@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_QUARANTINE_DIR = Path.home() / ".alterks" / "quarantine"
 DEFAULT_MANIFEST_PATH = Path.home() / ".alterks" / "quarantine.json"
+
+
+def _secure_dir(path: Path) -> None:
+    """Set owner-only permissions on a directory (best-effort, Unix only)."""
+    if os.name != "nt":
+        try:
+            path.chmod(stat.S_IRWXU)  # 0o700
+        except OSError:
+            pass
 
 
 class QuarantineReleaseBlocked(Exception):
@@ -147,6 +157,7 @@ def _save_manifest(manifest: Dict[str, dict], path: Path) -> None:
     prevents partial writes from corrupting the manifest.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    _secure_dir(path.parent)
     content = json.dumps(manifest, indent=2, default=str) + "\n"
     # Write to temp file in the same dir so os.replace is atomic
     fd, tmp = tempfile.mkstemp(
@@ -202,6 +213,7 @@ class _ManifestLock:
     ) -> None:
         self._lock_path = manifest_path.with_suffix(".lock")
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_dir(self._lock_path.parent)
         self._timeout = timeout
         self._fd: int = -1
 
@@ -320,6 +332,7 @@ class _ManifestLock:
         self._fd = os.open(
             str(self._lock_path),
             os.O_CREAT | os.O_RDWR,
+            0o600,
         )
 
 
@@ -402,6 +415,7 @@ class QuarantineManager:
         # Create isolated venv
         logger.info("Creating quarantine venv at %s", venv_path)
         venv_path.mkdir(parents=True, exist_ok=True)
+        _secure_dir(venv_path)
         venv.create(str(venv_path), with_pip=True, clear=True)
 
         # Install the package into the quarantine venv
