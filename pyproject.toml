@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alterks"
-version = "0.2.6"
+version = "0.2.7"
 description = "ALTER KILL SWITCH — Python package scanner, monitor, and supply chain attack mitigation tool."
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -49,6 +49,7 @@ dependencies = [
 dev = [
     "pytest>=7.0,<10.0",
     "pytest-asyncio>=0.21,<2.0",
+    "pytest-cov>=4.0,<7.0",
     "respx>=0.20,<1.0",
     "build>=1.0,<2.0",
     "twine>=4.0,<7.0",
@@ -98,6 +99,18 @@ packages = ["src/alterks"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "--cov=alterks --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+source = ["alterks"]
+omit = ["*/data/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]
 
 [tool.ruff]
 target-version = "py39"

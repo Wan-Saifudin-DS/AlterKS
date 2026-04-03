@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.7 — Test Coverage Reporting in CI
+
+- **Added**: `pytest-cov` integration for definitive line-coverage tracking. CI now runs `pytest --cov=alterks --cov-report=term-missing` on every push and PR. A minimum coverage threshold of 80% is enforced via `--cov-fail-under=80`. Current coverage: **91%** across 389 tests.
+
 ### v0.2.6 — PEP 561 py.typed Marker
 
 - **Added**: `py.typed` marker file for PEP 561 compliance. Static type checkers (mypy, pyright, etc.) in downstream projects will now discover AlterKS’s type annotations automatically when the package is installed.
