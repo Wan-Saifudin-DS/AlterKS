@@ -64,21 +64,37 @@ def refresh_top_packages(
     url: str = TOP_PYPI_PACKAGES_URL,
     count: int = TOP_PACKAGES_COUNT,
     timeout: float = 30.0,
+    max_redirects: int = 5,
 ) -> int:
     """Fetch the latest top-packages list from *url* and update the bundled file.
 
     Returns the number of package names written.
 
+    Parameters
+    ----------
+    timeout:
+        Per-request timeout in seconds (connect, read, write, pool).
+    max_redirects:
+        Maximum number of HTTP redirects to follow.  Prevents a
+        malicious or misconfigured server from stalling the client
+        with an unbounded redirect chain.
+
     Raises
     ------
     httpx.HTTPError
         On network/HTTP failures.
+    httpx.TooManyRedirects
+        If the server exceeds *max_redirects*.
     ValueError
         If the response cannot be parsed.
     """
     global _TOP_PACKAGES
 
-    with httpx.Client(timeout=timeout, verify=True) as client:
+    with httpx.Client(
+        timeout=timeout,
+        verify=True,
+        max_redirects=max_redirects,
+    ) as client:
         resp = client.get(url, follow_redirects=True)
     resp.raise_for_status()
 

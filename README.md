@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.5 — HTTP Redirect Limit for Top-Packages Fetch
+
+- **Fixed**: No explicit redirect limit for HTTP ops resolving top-packages (A04:2021 — Insecure Design). `refresh_top_packages()` now sets `max_redirects=5` on the `httpx.Client`, preventing a malicious or misconfigured server from stalling the client with an unbounded redirect chain. Raises `httpx.TooManyRedirects` if the limit is exceeded.
+
 ### v0.2.4 — Webhook Secret Environment Variable Support
 
 - **Fixed**: `webhook_secret` may be stored in plaintext in `pyproject.toml` (A07:2021 — Identification Failures). The webhook HMAC secret is now resolved with priority: (1) `ALTERKS_WEBHOOK_SECRET` environment variable, (2) `webhook_secret` in `[tool.alterks]`. When the secret is found in the config file rather than the environment, a warning is emitted advising the user to use the environment variable instead, since `pyproject.toml` is typically committed to version control.

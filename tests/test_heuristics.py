@@ -425,3 +425,16 @@ class TestRefreshTopPackages:
                 refresh_top_packages()
 
         assert captured.get("verify") is True
+        assert captured.get("max_redirects") == 5
+
+    @respx.mock
+    def test_max_redirects_enforced(self, tmp_path: Path):
+        """Too many redirects should raise httpx.TooManyRedirects."""
+        respx.get(TOP_PYPI_PACKAGES_URL).mock(
+            return_value=httpx.Response(
+                301, headers={"Location": TOP_PYPI_PACKAGES_URL}
+            )
+        )
+        with patch("alterks.heuristics._DATA_DIR", tmp_path):
+            with pytest.raises(httpx.TooManyRedirects):
+                refresh_top_packages(max_redirects=2)
