@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.1 — Dependency Upper Bounds
+
+- **Fixed**: No upper bounds on dependency versions (A06:2021 — Vulnerable Components). All runtime and dev dependencies in `pyproject.toml` now specify both minimum and maximum version bounds (e.g., `httpx>=0.24,<1.0`, `click>=8.0,<9.0`). Prevents a future major release with breaking changes or a supply chain compromise from being automatically installed. Upper bounds are set at the next major version boundary from current known-good versions.
+
 ### v0.2.0 — Concurrent Write Safety (Monitor)
 
 - **Fixed**: `notify_json_file()` concurrent write corruption in `alterks monitor` (A04:2021 — Insecure Design). Monitor JSON-lines output now uses exclusive file locking (`msvcrt.locking(LK_NBLCK)` on Windows, `fcntl.flock(LOCK_EX | LOCK_NB)` on Unix) with a non-blocking retry loop and 10-second timeout — the same pattern already used in `actions.py` (`_locked_append`). Multiple concurrent `alterks monitor` processes writing to the same JSON-lines file can no longer interleave mid-line and corrupt output.
