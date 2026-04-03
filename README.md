@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.2 — Specific Exception Handling in update-db
+
+- **Fixed**: Broad `except Exception` in `update-db` command (A09:2021 — Logging Failures). The `update-db` command now catches only `httpx.HTTPError`, `ValueError`, and `OSError` — the specific exceptions that `refresh_top_packages()` can raise. Internal bugs (`TypeError`, `AttributeError`, etc.) are no longer silently masked behind a generic "Error" message and will propagate with full tracebacks for debugging.
+
 ### v0.2.1 — Dependency Upper Bounds
 
 - **Fixed**: No upper bounds on dependency versions (A06:2021 — Vulnerable Components). All runtime and dev dependencies in `pyproject.toml` now specify both minimum and maximum version bounds (e.g., `httpx>=0.24,<1.0`, `click>=8.0,<9.0`). Prevents a future major release with breaking changes or a supply chain compromise from being automatically installed. Upper bounds are set at the next major version boundary from current known-good versions.

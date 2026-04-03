@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import httpx
 from click.testing import CliRunner
 
 from alterks.cli import main
@@ -460,8 +461,28 @@ class TestUpdateDB:
         assert "5000" in result.output
         mock_refresh.assert_called_once()
 
-    @patch("alterks.heuristics.refresh_top_packages", side_effect=RuntimeError("network down"))
+    @patch("alterks.heuristics.refresh_top_packages", side_effect=httpx.HTTPError("network down"))
     def test_update_db_error(self, mock_refresh, runner):
         result = runner.invoke(main, ["update-db"])
         assert result.exit_code == 1
         assert "network down" in result.output
+
+    @patch("alterks.heuristics.refresh_top_packages", side_effect=ValueError("bad json"))
+    def test_update_db_value_error(self, mock_refresh, runner):
+        result = runner.invoke(main, ["update-db"])
+        assert result.exit_code == 1
+        assert "bad json" in result.output
+
+    @patch("alterks.heuristics.refresh_top_packages", side_effect=OSError("disk full"))
+    def test_update_db_os_error(self, mock_refresh, runner):
+        result = runner.invoke(main, ["update-db"])
+        assert result.exit_code == 1
+        assert "disk full" in result.output
+
+    @patch("alterks.heuristics.refresh_top_packages", side_effect=TypeError("unexpected"))
+    def test_update_db_unexpected_error_propagates(self, mock_refresh, runner):
+        """Internal bugs (TypeError etc.) must NOT be silently swallowed."""
+        result = runner.invoke(main, ["update-db"])
+        assert result.exit_code != 0
+        # The error should propagate as an unhandled exception, not a friendly message
+        assert isinstance(result.exception, TypeError)

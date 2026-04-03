@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import click
+import httpx
 from rich.console import Console
 from rich.table import Table
 
@@ -564,7 +565,7 @@ def update_db(ctx: click.Context) -> None:
     console.print("Fetching latest top-packages list…", style="bold")
     try:
         count = refresh_top_packages()
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError, OSError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(1) from exc
 
