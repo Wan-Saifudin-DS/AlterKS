@@ -284,6 +284,10 @@ src/alterks/
 
 ## Changelog
 
+### v0.2.0 — Concurrent Write Safety (Monitor)
+
+- **Fixed**: `notify_json_file()` concurrent write corruption in `alterks monitor` (A04:2021 — Insecure Design). Monitor JSON-lines output now uses exclusive file locking (`msvcrt.locking(LK_NBLCK)` on Windows, `fcntl.flock(LOCK_EX | LOCK_NB)` on Unix) with a non-blocking retry loop and 10-second timeout — the same pattern already used in `actions.py` (`_locked_append`). Multiple concurrent `alterks monitor` processes writing to the same JSON-lines file can no longer interleave mid-line and corrupt output.
+
 ### v0.1.27 — Cross-Platform CI
 
 - **Added**: Windows CI test matrix. GitHub Actions now runs the full test suite on both `ubuntu-latest` and `windows-latest` across Python 3.9 and 3.12 (4 matrix jobs, `fail-fast: false`). Ensures cross-platform compatibility is validated on every push and pull request.

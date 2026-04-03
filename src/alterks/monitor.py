@@ -19,7 +19,9 @@ import hmac
 import ipaddress
 import json
 import logging
+import os
 import socket
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -81,6 +83,62 @@ def _build_report(
     }
 
 
+# ---------------------------------------------------------------------------
+# File-locking helpers (mirrors actions.py for concurrent-write safety)
+# ---------------------------------------------------------------------------
+
+_REPORT_LOCK_TIMEOUT: float = 10.0  # seconds
+_REPORT_LOCK_RETRY: float = 0.1     # seconds between retries
+
+
+def _acquire_monitor_lock(fd: int, lock_path: Path) -> None:
+    """Non-blocking lock acquisition with timeout."""
+    deadline = time.monotonic() + _REPORT_LOCK_TIMEOUT
+    while True:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except (OSError, IOError):
+            if time.monotonic() >= deadline:
+                raise OSError(
+                    f"Could not acquire monitor report lock {lock_path} "
+                    f"within {_REPORT_LOCK_TIMEOUT}s"
+                )
+            time.sleep(_REPORT_LOCK_RETRY)
+
+
+def _release_monitor_lock(fd: int) -> None:
+    """Release the file lock (best-effort)."""
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _locked_append(path: Path, lock_path: Path, data: str) -> None:
+    """Append *data* to *path* while holding an exclusive file lock."""
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    try:
+        _acquire_monitor_lock(fd, lock_path)
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(data)
+        finally:
+            _release_monitor_lock(fd)
+    finally:
+        os.close(fd)
+
+
 def notify_json_file(
     report: Dict[str, Any],
     output_path: Path,
@@ -88,10 +146,18 @@ def notify_json_file(
     """Write the scan report as a JSON file.
 
     Appends to a JSON-lines file so history is preserved.
+    An exclusive file lock is held for the duration of the write so that
+    concurrent ``alterks monitor`` processes writing to the same file
+    do not interleave output and corrupt the JSON-lines format.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(report, default=str) + "\n")
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(report, default=str) + "\n"
+        lock_path = output_path.with_suffix(output_path.suffix + ".lock")
+        _locked_append(output_path, lock_path, line)
+    except OSError as exc:
+        logger.error("Failed to write monitor report to %s: %s", output_path, exc)
+        return
     logger.info("Report written to %s", output_path)
 
 
