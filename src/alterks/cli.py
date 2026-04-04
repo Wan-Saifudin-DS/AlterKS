@@ -180,14 +180,18 @@ def main(ctx: click.Context, verbose: bool, quiet: bool, no_color: bool) -> None
     "--fail-closed", is_flag=True, default=False,
     help="Alert instead of allowing when vulnerability data is unavailable.",
 )
+@click.option(
+    "--no-code-scan", is_flag=True, default=False,
+    help="Skip source code download and static analysis for faster scans.",
+)
 @click.pass_context
-def scan(ctx: click.Context, requirements: Optional[Path], output_format: str, fail_closed: bool) -> None:
+def scan(ctx: click.Context, requirements: Optional[Path], output_format: str, fail_closed: bool, no_code_scan: bool) -> None:
     """Scan installed packages or a requirements file for vulnerabilities."""
     console: Console = ctx.obj["console"]
     config = load_config()
     if fail_closed:
         config.fail_closed = True
-    scanner = Scanner(config=config)
+    scanner = Scanner(config=config, skip_code_scan=no_code_scan)
 
     if requirements:
         console.print(f"Scanning requirements file: {requirements}", style="bold")
@@ -232,8 +236,12 @@ def scan(ctx: click.Context, requirements: Optional[Path], output_format: str, f
     "--fail-closed", is_flag=True, default=False,
     help="Alert instead of allowing when vulnerability data is unavailable.",
 )
+@click.option(
+    "--no-code-scan", is_flag=True, default=False,
+    help="Skip source code download and static analysis for faster installs.",
+)
 @click.pass_context
-def install(ctx: click.Context, package: str, dry_run: bool, fail_closed: bool) -> None:
+def install(ctx: click.Context, package: str, dry_run: bool, fail_closed: bool, no_code_scan: bool) -> None:
     """Pre-scan a package, then install it if safe.
 
     PACKAGE should be in pip format (e.g. ``requests==2.31.0`` or just
@@ -246,7 +254,7 @@ def install(ctx: click.Context, package: str, dry_run: bool, fail_closed: bool) 
     config = load_config()
     if fail_closed:
         config.fail_closed = True
-    result = resolve_and_scan(package, config)
+    result = resolve_and_scan(package, config, skip_code_scan=no_code_scan)
 
     if result is None:
         console.print(f"Could not resolve package: {package}", style="bold red")

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 def resolve_and_scan(
     spec: str,
     config: Optional[AlterKSConfig] = None,
+    skip_code_scan: bool = False,
 ) -> Optional[ScanResult]:
     """Resolve a pip-style package spec and scan it.
 
@@ -33,6 +34,8 @@ def resolve_and_scan(
         Package specification (e.g. ``requests==2.31.0`` or ``requests``).
     config:
         AlterKS configuration.  When *None*, the default is loaded.
+    skip_code_scan:
+        When *True*, skip downloading and analyzing package source code.
 
     Returns
     -------
@@ -56,7 +59,7 @@ def resolve_and_scan(
         logger.info("Resolved %s to version %s", name, version)
 
     # Vulnerability scan via OSV (scanner now includes heuristics)
-    scanner = Scanner(config=config)
+    scanner = Scanner(config=config, skip_code_scan=skip_code_scan)
     result = scanner.scan_package(name, version)
 
     return result

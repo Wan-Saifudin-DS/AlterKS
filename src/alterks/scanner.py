@@ -50,10 +50,12 @@ class Scanner:
         config: Optional[AlterKSConfig] = None,
         osv_client: Optional[OSVClient] = None,
         pypi_client: Optional[PyPIClient] = None,
+        skip_code_scan: bool = False,
     ) -> None:
         self.config = config or load_config()
         self.osv = osv_client or OSVClient()
         self.pypi = pypi_client or PyPIClient()
+        self.skip_code_scan = skip_code_scan
 
     # -- Public API ----------------------------------------------------------
 
@@ -109,7 +111,7 @@ class Scanner:
         )
 
         # Heuristic risk assessment
-        self._apply_heuristics(result)
+        self._apply_heuristics(result, download_source=not self.skip_code_scan)
 
         return result
 

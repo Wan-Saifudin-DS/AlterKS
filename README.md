@@ -48,7 +48,7 @@ Supply chain attacks on PyPI are increasing — typosquatting, dependency confus
 
 - **Vulnerability scanning** — queries OSV.dev for known CVEs/PYSECs against installed or to-be-installed packages
 - **Heuristic risk scoring** — detects typosquatting, suspiciously new packages, single-maintainer risks, poor metadata quality
-- **Static code analysis** — scans `setup.py` and `__init__.py` for obfuscated malware patterns (base64+exec, credential theft, reverse shells)
+- **Static code analysis** — scans `setup.py` and `__init__.py` for obfuscated malware patterns using both regex and AST analysis (base64+exec, credential theft, reverse shells) with `--no-code-scan` bypass option
 - **Kill switch actions** — block, quarantine, or alert based on configurable severity thresholds
 - **Pre-install protection** — `alterks install <pkg>` scans before pip installs
 - **Continuous monitoring** — scheduled re-scans detect newly disclosed vulnerabilities with JSON and webhook notifications
@@ -273,6 +273,7 @@ src/alterks/
 ├── config.py            # Policy config loader from pyproject.toml
 ├── scanner.py           # Scan orchestrator: environment/requirements scanning
 ├── heuristics.py        # Composite risk scorer (typosquatting, age, code patterns…)
+├── ast_analyzer.py      # AST-based code analysis (exec/eval/subprocess detection)
 ├── extractor.py         # Secure package download and extraction for code analysis
 ├── actions.py           # Kill switch logic: block, quarantine, alert
 ├── quarantine.py        # Isolated venv quarantine manager
@@ -287,6 +288,15 @@ src/alterks/
 ```
 
 ## Changelog
+
+### v0.3.1 — AST Analysis & User Controls
+
+- **Added**: AST-based code analyzer (`ast_analyzer.py`) that walks Python syntax trees to detect suspicious function calls (`exec`, `eval`, `compile`, `__import__`), credential harvesting (`os.environ`), and dangerous module usage (`subprocess`, `ctypes`, `socket`) — while ignoring matches inside comments and string literals, eliminating the primary source of regex false positives.
+- **Added**: Two-pass analysis pipeline in `code_patterns` heuristic: regex pass for obfuscated payloads (hex strings, base64 blobs) + AST pass for structural detection. Final score is the maximum of both passes with cross-pass escalation.
+- **Added**: `--no-code-scan` flag on `alterks install` and `alterks scan` commands to skip source code download and static analysis for faster scans.
+- **Added**: AST ruleset versioning (`AST_RULES_VERSION = "1.0"`) for audit trail reproducibility.
+- **Changed**: `CODE_PATTERNS_VERSION` bumped from `"1.0"` to `"1.1"` to reflect AST integration.
+- **Changed**: `Scanner` accepts `skip_code_scan` parameter; `resolve_and_scan()` accepts `skip_code_scan` keyword argument.
 
 ### v0.3.0 — Static Code Analysis (Heuristic Expansion)
 

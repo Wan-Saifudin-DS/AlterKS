@@ -32,7 +32,7 @@ from alterks.sources.pypi import PyPIMetadata
 logger = logging.getLogger(__name__)
 
 # Pattern ruleset version — included in reports for audit trail reproducibility.
-CODE_PATTERNS_VERSION = "1.0"
+CODE_PATTERNS_VERSION = "1.1"
 
 # ---------------------------------------------------------------------------
 # Top-package list for typosquatting
@@ -377,6 +377,18 @@ def _score_code_patterns(
 ) -> Tuple[float, str, Optional[str], Optional[str]]:
     """Scan extracted source files for suspicious code patterns.
 
+    Uses a two-pass approach:
+    1. **Regex pass** — fast pattern matching for obfuscated payloads,
+       hex-escaped strings, and large base64 blobs that cannot be
+       represented as AST nodes.
+    2. **AST pass** — precise detection of function calls (``exec``,
+       ``eval``, ``subprocess.Popen``, etc.) that ignores comments
+       and string literals, reducing false positives.
+
+    The final score is the maximum of both passes. AST findings are
+    preferred for reporting when they match, since they provide more
+    precise location information.
+
     Returns ``(score, reason, file_path, line_range)`` where score 0.0
     means no risk.
     """
@@ -388,6 +400,66 @@ def _score_code_patterns(
     if not py_files:
         return 0.0, "No Python source files to analyze", None, None
 
+    # --- Pass 1: Regex-based detection (hex blobs, base64, obfuscation) ---
+    regex_score, regex_reason, regex_file, regex_lines, regex_count = (
+        _regex_scan(extracted_dir, py_files)
+    )
+
+    # --- Pass 2: AST-based detection (structural analysis) ---
+    from alterks.ast_analyzer import analyze_directory
+
+    ast_findings = analyze_directory(extracted_dir)
+    ast_score = 0.0
+    ast_reason = ""
+    ast_file: Optional[str] = None
+    ast_lines: Optional[str] = None
+    ast_count = len(ast_findings)
+
+    if ast_findings:
+        top = ast_findings[0]
+        ast_score = top.severity
+        ast_reason = f"{top.description} in {top.location}"
+        ast_file = top.file_path
+        ast_lines = str(top.line)
+
+        # Escalate if multiple distinct AST findings
+        if ast_count >= 3:
+            ast_score = min(1.0, ast_score + 0.1)
+
+        if ast_count > 1:
+            ast_reason += f" (+{ast_count - 1} more finding(s))"
+
+    # --- Combine: take whichever pass produced a higher score ---
+    total_findings = regex_count + ast_count
+
+    if ast_score >= regex_score and ast_score > 0:
+        best_score = ast_score
+        best_reason = ast_reason
+        best_file = ast_file
+        best_lines = ast_lines
+    elif regex_score > 0:
+        best_score = regex_score
+        best_reason = regex_reason
+        best_file = regex_file
+        best_lines = regex_lines
+    else:
+        return 0.0, "No suspicious code patterns detected", None, None
+
+    # Cross-pass escalation: if both passes found issues, boost
+    if regex_count > 0 and ast_count > 0:
+        best_score = min(1.0, best_score + 0.05)
+
+    return best_score, best_reason, best_file, best_lines
+
+
+def _regex_scan(
+    extracted_dir: Path,
+    py_files: List[Path],
+) -> Tuple[float, str, Optional[str], Optional[str], int]:
+    """Run regex-based pattern matching on inspectable files.
+
+    Returns ``(score, reason, file_path, line_range, finding_count)``.
+    """
     best_score = 0.0
     best_reason = ""
     best_file: Optional[str] = None
@@ -428,7 +500,7 @@ def _score_code_patterns(
                     best_lines = str(line_no)
 
     if not all_findings:
-        return 0.0, "No suspicious code patterns detected", None, None
+        return 0.0, "", None, None, 0
 
     # Escalate if multiple distinct patterns found
     if len(all_findings) >= 3:
@@ -438,7 +510,7 @@ def _score_code_patterns(
     if len(all_findings) > 1:
         summary += f" (+{len(all_findings) - 1} more finding(s))"
 
-    return best_score, summary, best_file, best_lines
+    return best_score, summary, best_file, best_lines, len(all_findings)
 
 
 def _find_inspectable_files(extracted_dir: Path) -> List[Path]:

@@ -19,7 +19,7 @@ from alterks.heuristics import (
 
 class TestCodePatternsVersion:
     def test_version_is_set(self):
-        assert CODE_PATTERNS_VERSION == "1.0"
+        assert CODE_PATTERNS_VERSION == "1.1"
 
 
 # ---------------------------------------------------------------------------
