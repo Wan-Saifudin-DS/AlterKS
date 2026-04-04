@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alterks"
-version = "0.2.7"
+version = "0.3.0"
 description = "ALTER KILL SWITCH — Python package scanner, monitor, and supply chain attack mitigation tool."
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -84,11 +84,12 @@ blocklist = []
 
 # Heuristic weights (must sum to 1.0 conceptually, but normalized internally)
 [tool.alterks.heuristic_weights]
-typosquatting = 0.30
-package_age = 0.20
-maintainer_count = 0.15
-release_pattern = 0.15
-metadata_quality = 0.20
+typosquatting = 0.25
+package_age = 0.15
+maintainer_count = 0.10
+release_pattern = 0.10
+metadata_quality = 0.15
+code_patterns = 0.25
 
 # ---------------------------------------------------------------------------
 # Tool configuration

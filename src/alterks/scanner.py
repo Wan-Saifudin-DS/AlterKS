@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 import re
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -18,8 +19,16 @@ import httpx
 from packaging.requirements import InvalidRequirement, Requirement
 
 from alterks.config import AlterKSConfig, load_config
+from alterks.extractor import (
+    DownloadError,
+    ExtractionError,
+    download_package,
+    extract_package,
+)
+from alterks.heuristics import compute_risk
 from alterks.models import PolicyAction, ScanResult, Severity, Vulnerability
 from alterks.sources.osv import OSVClient, OSVError
+from alterks.sources.pypi import PyPIClient, PyPIError, ReleaseFile
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +49,11 @@ class Scanner:
         self,
         config: Optional[AlterKSConfig] = None,
         osv_client: Optional[OSVClient] = None,
+        pypi_client: Optional[PyPIClient] = None,
     ) -> None:
         self.config = config or load_config()
         self.osv = osv_client or OSVClient()
+        self.pypi = pypi_client or PyPIClient()
 
     # -- Public API ----------------------------------------------------------
 
@@ -89,13 +100,18 @@ class Scanner:
 
         action, reason = self._resolve_action(name, version, vulns)
 
-        return ScanResult(
+        result = ScanResult(
             name=name,
             version=version,
             vulnerabilities=vulns,
             action=action,
             reason=reason,
         )
+
+        # Heuristic risk assessment
+        self._apply_heuristics(result)
+
+        return result
 
     def scan_environment(self) -> List[ScanResult]:
         """Scan all packages installed in the current Python environment."""
@@ -182,7 +198,120 @@ class Scanner:
                 reason=reason,
             ))
 
+        # Apply heuristics (metadata-only for batch scans — no download)
+        for result in results:
+            if result.risk is None and result.action != PolicyAction.BLOCK:
+                self._apply_heuristics(result, download_source=False)
+
         return results
+
+    def _apply_heuristics(
+        self,
+        result: ScanResult,
+        download_source: bool = True,
+    ) -> None:
+        """Apply heuristic risk scoring to a scan result.
+
+        Parameters
+        ----------
+        result:
+            The scan result to enrich with heuristic data.
+        download_source:
+            Whether to download and extract the package source
+            for code pattern analysis.
+        """
+        try:
+            metadata = self.pypi.get_metadata(result.name)
+        except PyPIError as exc:
+            logger.warning(
+                "PyPI metadata fetch failed for %s: %s", result.name, exc
+            )
+            return
+
+        extracted_dir = None
+        tmpdir_ctx = None
+
+        if download_source:
+            try:
+                tmpdir_ctx, extracted_dir = self._download_and_extract(
+                    result.name, result.version, metadata
+                )
+            except (DownloadError, ExtractionError) as exc:
+                logger.warning(
+                    "Code analysis skipped for %s==%s: %s",
+                    result.name, result.version, exc,
+                )
+                extracted_dir = None
+
+        try:
+            risk = compute_risk(
+                result.name, result.version, metadata, self.config,
+                extracted_dir=extracted_dir,
+            )
+            result.risk = risk
+
+            # Elevate action if risk score exceeds threshold
+            if (
+                self.config.exceeds_risk_threshold(risk.risk_score)
+                and result.action == PolicyAction.ALLOW
+            ):
+                result.action = PolicyAction.ALERT
+                result.reason = (
+                    f"Heuristic risk score {risk.risk_score} exceeds "
+                    f"threshold {self.config.risk_threshold}"
+                )
+        except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+            logger.warning("Heuristic scoring failed for %s: %s", result.name, exc)
+        finally:
+            # Guarantee cleanup of extracted files
+            if tmpdir_ctx is not None:
+                try:
+                    tmpdir_ctx.cleanup()
+                except Exception:
+                    pass
+
+    def _download_and_extract(
+        self,
+        name: str,
+        version: str,
+        metadata: object,
+    ) -> Tuple[tempfile.TemporaryDirectory, Path]:
+        """Download and extract a package into a temporary directory.
+
+        Returns ``(tmpdir_context, extracted_path)`` so the caller can
+        clean up the temporary directory when done.
+        """
+        release_files = self.pypi.get_release_files(name, version)
+
+        # Prefer sdist for source analysis, fall back to wheel
+        target: Optional[ReleaseFile] = None
+        for rf in release_files:
+            if rf.packagetype == "sdist":
+                target = rf
+                break
+        if target is None:
+            for rf in release_files:
+                if rf.filename.endswith(".whl"):
+                    target = rf
+                    break
+        if target is None:
+            raise DownloadError(
+                f"No downloadable files found for {name}=={version}"
+            )
+
+        tmpdir = tempfile.TemporaryDirectory(prefix="alterks-extract-")
+        tmpdir_path = Path(tmpdir.name)
+
+        try:
+            archive = download_package(
+                target.url, target.sha256, tmpdir_path
+            )
+            extract_package(archive, tmpdir_path)
+        except Exception:
+            tmpdir.cleanup()
+            raise
+
+        return tmpdir, tmpdir_path
 
     def _resolve_action(
         self,

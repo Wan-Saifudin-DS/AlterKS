@@ -39,11 +39,12 @@ DEFAULT_SEVERITY_ACTIONS: Dict[str, str] = {
 }
 
 DEFAULT_HEURISTIC_WEIGHTS: Dict[str, float] = {
-    "typosquatting": 0.30,
-    "package_age": 0.20,
-    "maintainer_count": 0.15,
-    "release_pattern": 0.15,
-    "metadata_quality": 0.20,
+    "typosquatting": 0.25,
+    "package_age": 0.15,
+    "maintainer_count": 0.10,
+    "release_pattern": 0.10,
+    "metadata_quality": 0.15,
+    "code_patterns": 0.25,
 }
 
 DEFAULT_RISK_THRESHOLD: float = 60.0
@@ -160,6 +161,12 @@ def _build_config(raw: Dict[str, Any]) -> AlterKSConfig:
 
     raw_weights = raw.get("heuristic_weights", DEFAULT_HEURISTIC_WEIGHTS)
     heuristic_weights = {str(k): float(v) for k, v in raw_weights.items()}
+
+    # Merge-with-defaults: ensure new built-in scorers are always present
+    # even when users have customised only some weights.
+    for key, default_val in DEFAULT_HEURISTIC_WEIGHTS.items():
+        if key not in heuristic_weights:
+            heuristic_weights[key] = default_val
 
     return AlterKSConfig(
         severity_actions=severity_actions,

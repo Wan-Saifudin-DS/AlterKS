@@ -141,6 +141,8 @@ class RiskFactor:
     score: float  # 0.0 – 1.0 (normalised)
     weight: float  # weight in composite calculation
     reason: str = ""
+    file_path: Optional[str] = None
+    line_range: Optional[str] = None
 
     @property
     def weighted_score(self) -> float:

@@ -1,7 +1,7 @@
 """Heuristic risk scorer for Python packages.
 
 Computes a composite risk score (0–100) by evaluating multiple signals from
-PyPI metadata:
+PyPI metadata and (optionally) static source code analysis:
 
 - **Typosquatting** — Levenshtein distance against a bundled list of popular
   PyPI package names, plus common substitution patterns.
@@ -9,6 +9,8 @@ PyPI metadata:
 - **Maintainer count** — Single-maintainer packages score higher.
 - **Release pattern** — Few releases or very recent first release score higher.
 - **Metadata quality** — Missing homepage, description, or classifiers score higher.
+- **Code patterns** — Static regex analysis of ``setup.py`` / ``__init__.py``
+  for known malicious patterns (obfuscated exec, credential theft, etc.).
 
 Weights are configurable via ``[tool.alterks]`` in ``pyproject.toml``.
 """
@@ -19,7 +21,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import httpx
 
@@ -28,6 +30,9 @@ from alterks.models import PackageRisk, RiskFactor
 from alterks.sources.pypi import PyPIMetadata
 
 logger = logging.getLogger(__name__)
+
+# Pattern ruleset version — included in reports for audit trail reproducibility.
+CODE_PATTERNS_VERSION = "1.0"
 
 # ---------------------------------------------------------------------------
 # Top-package list for typosquatting
@@ -306,6 +311,154 @@ def _score_metadata_quality(meta: PyPIMetadata) -> tuple[float, str]:
 
 
 # ---------------------------------------------------------------------------
+# Code pattern detection (static source analysis)
+# ---------------------------------------------------------------------------
+
+# High-risk files where install-time code execution occurs
+_INSTALL_TIME_FILES = {"setup.py", "setup.cfg", "conftest.py"}
+
+# Files to inspect in any package
+_INSPECTABLE_FILES = {*_INSTALL_TIME_FILES, "__init__.py"}
+
+# Suspicious patterns — each is (compiled_regex, severity 0.0–1.0, description)
+_SUSPICIOUS_PATTERNS: List[Tuple[re.Pattern[str], float, str]] = [
+    # Obfuscated execution
+    (re.compile(
+        r"(?:exec|eval|compile)\s*\(\s*(?:base64\.b64decode|codecs\.decode|"
+        r"bytes\.fromhex|bytearray\.fromhex)",
+        re.IGNORECASE,
+    ), 0.95, "exec/eval with obfuscated input (base64/hex decode)"),
+
+    # Direct exec of compile — common in install-time code injection
+    (re.compile(
+        r"exec\s*\(\s*compile\s*\(",
+        re.IGNORECASE,
+    ), 0.85, "exec(compile(...)) — dynamic code compilation"),
+
+    # Credential harvesting via environment variables
+    (re.compile(
+        r"os\.environ\b.*(?:AWS|TOKEN|SECRET|KEY|PASS|CREDENTIAL|AUTH)",
+        re.IGNORECASE,
+    ), 0.80, "Access to sensitive environment variables"),
+
+    # Network calls in install-time files (setup.py)
+    (re.compile(
+        r"(?:socket\.(?:connect|create_connection)|"
+        r"urllib\.request\.urlopen|"
+        r"requests\.(?:get|post|put)|"
+        r"httpx\.(?:get|post|put|Client))",
+        re.IGNORECASE,
+    ), 0.75, "Network call detected"),
+
+    # Subprocess execution
+    (re.compile(
+        r"subprocess\.(?:Popen|call|run|check_call|check_output)\s*\(",
+    ), 0.70, "Subprocess execution"),
+
+    # Native code loading
+    (re.compile(
+        r"ctypes\.(?:cdll|windll|CDLL|WinDLL)\b",
+    ), 0.70, "Native code loading via ctypes"),
+
+    # Large hex-escaped strings (potential obfuscated URLs/payloads)
+    (re.compile(
+        r"(?:\\x[0-9a-fA-F]{2}){20,}",
+    ), 0.75, "Large hex-escaped string (possible obfuscated payload)"),
+
+    # Large base64 blobs inline
+    (re.compile(
+        r"""(?:"|')(?:[A-Za-z0-9+/]{100,})={0,2}(?:"|')""",
+    ), 0.60, "Large base64-encoded string literal"),
+]
+
+
+def _score_code_patterns(
+    extracted_dir: Optional[Path],
+) -> Tuple[float, str, Optional[str], Optional[str]]:
+    """Scan extracted source files for suspicious code patterns.
+
+    Returns ``(score, reason, file_path, line_range)`` where score 0.0
+    means no risk.
+    """
+    if extracted_dir is None:
+        return 0.0, "", None, None
+
+    py_files = _find_inspectable_files(extracted_dir)
+
+    if not py_files:
+        return 0.0, "No Python source files to analyze", None, None
+
+    best_score = 0.0
+    best_reason = ""
+    best_file: Optional[str] = None
+    best_lines: Optional[str] = None
+    all_findings: List[str] = []
+
+    for py_path in py_files:
+        basename = py_path.name.lower()
+        is_install_time = basename in _INSTALL_TIME_FILES
+
+        try:
+            content = py_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        for pattern, severity, description in _SUSPICIOUS_PATTERNS:
+            # Network calls and subprocess are only flagged in install-time files
+            if not is_install_time and description in (
+                "Network call detected",
+                "Subprocess execution",
+            ):
+                continue
+
+            for match in pattern.finditer(content):
+                line_no = content[:match.start()].count("\n") + 1
+                rel_path = str(py_path.relative_to(extracted_dir))
+
+                # Boost severity for install-time files
+                effective = min(1.0, severity + 0.1) if is_install_time else severity
+
+                finding = f"{description} in {rel_path}:{line_no}"
+                all_findings.append(finding)
+
+                if effective > best_score:
+                    best_score = effective
+                    best_reason = finding
+                    best_file = rel_path
+                    best_lines = str(line_no)
+
+    if not all_findings:
+        return 0.0, "No suspicious code patterns detected", None, None
+
+    # Escalate if multiple distinct patterns found
+    if len(all_findings) >= 3:
+        best_score = min(1.0, best_score + 0.1)
+
+    summary = best_reason
+    if len(all_findings) > 1:
+        summary += f" (+{len(all_findings) - 1} more finding(s))"
+
+    return best_score, summary, best_file, best_lines
+
+
+def _find_inspectable_files(extracted_dir: Path) -> List[Path]:
+    """Find Python files eligible for code pattern inspection.
+
+    Only inspects files whose basenames are in ``_INSPECTABLE_FILES``
+    to limit scope and avoid false positives from application code.
+    """
+    results: List[Path] = []
+    for root, _dirs, files in os.walk(extracted_dir):
+        for fname in files:
+            if fname.lower() in _INSPECTABLE_FILES:
+                results.append(Path(root) / fname)
+    return results
+
+
+import os  # noqa: E402 — grouped with walk usage above
+
+
+# ---------------------------------------------------------------------------
 # Composite risk scorer
 # ---------------------------------------------------------------------------
 
@@ -323,6 +476,7 @@ def compute_risk(
     version: str,
     metadata: PyPIMetadata,
     config: Optional[AlterKSConfig] = None,
+    extracted_dir: Optional[Path] = None,
 ) -> PackageRisk:
     """Compute a composite heuristic risk score for a package.
 
@@ -336,6 +490,9 @@ def compute_risk(
         Parsed PyPI metadata.
     config:
         AlterKS configuration (for custom weights).  Uses defaults when *None*.
+    extracted_dir:
+        Path to extracted package source for code pattern analysis.
+        When *None*, the ``code_patterns`` heuristic is skipped.
 
     Returns
     -------
@@ -348,6 +505,7 @@ def compute_risk(
     total_weighted = 0.0
     total_weight = 0.0
 
+    # Run metadata-based scorers
     for heuristic_name, scorer in _HEURISTIC_SCORERS.items():
         weight = weights.get(heuristic_name, 0.0)
         if weight <= 0:
@@ -362,6 +520,23 @@ def compute_risk(
         ))
         total_weighted += score * weight
         total_weight += weight
+
+    # Run code pattern scorer (closure captures extracted_dir)
+    code_weight = weights.get("code_patterns", 0.0)
+    if code_weight > 0:
+        cp_score, cp_reason, cp_file, cp_lines = _score_code_patterns(
+            extracted_dir
+        )
+        factors.append(RiskFactor(
+            name="code_patterns",
+            score=cp_score,
+            weight=code_weight,
+            reason=cp_reason,
+            file_path=cp_file,
+            line_range=cp_lines,
+        ))
+        total_weighted += cp_score * code_weight
+        total_weight += code_weight
 
     # Normalise to 0–100
     if total_weight > 0:

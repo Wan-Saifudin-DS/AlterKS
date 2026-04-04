@@ -38,6 +38,7 @@ AlterKS-Security-Audit-*.md
 AlterKS-testing.md
 AlterKS-v*-article.md
 AlterKS-v*-usecase.md
+AlterKS-v*-Comparison.md
 
 # Build artifacts
 *.dist-info/

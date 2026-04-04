@@ -8,7 +8,7 @@
 
 **Python package scanner, monitor, and supply chain attack mitigation tool.**
 
-AlterKS scans your Python dependencies for known vulnerabilities (via [OSV.dev](https://osv.dev)) and suspicious package metadata heuristics, then takes configurable action: **block** installation, **quarantine** to an isolated environment, or **alert** with a warning.
+AlterKS scans your Python dependencies for known vulnerabilities (via [OSV.dev](https://osv.dev)) and suspicious package metadata heuristics, then takes configurable action: **block** installation, **quarantine** to an isolated environment, or **alert** with a warning. Starting from v0.3.0, AlterKS also performs **static source code analysis** to detect obfuscated malware in `setup.py` and `__init__.py`.
 
 ## Why AlterKS?
 
@@ -48,6 +48,7 @@ Supply chain attacks on PyPI are increasing — typosquatting, dependency confus
 
 - **Vulnerability scanning** — queries OSV.dev for known CVEs/PYSECs against installed or to-be-installed packages
 - **Heuristic risk scoring** — detects typosquatting, suspiciously new packages, single-maintainer risks, poor metadata quality
+- **Static code analysis** — scans `setup.py` and `__init__.py` for obfuscated malware patterns (base64+exec, credential theft, reverse shells)
 - **Kill switch actions** — block, quarantine, or alert based on configurable severity thresholds
 - **Pre-install protection** — `alterks install <pkg>` scans before pip installs
 - **Continuous monitoring** — scheduled re-scans detect newly disclosed vulnerabilities with JSON and webhook notifications
@@ -227,22 +228,24 @@ allowlist = ["my-internal-package"]
 blocklist = ["known-malicious-pkg"]
 
 [tool.alterks.heuristic_weights]
-typosquatting = 0.30
-package_age = 0.20
-maintainer_count = 0.15
-release_pattern = 0.15
-metadata_quality = 0.20
+typosquatting = 0.25
+package_age = 0.15
+maintainer_count = 0.10
+release_pattern = 0.10
+metadata_quality = 0.15
+code_patterns = 0.25
 ```
 
 ## Heuristic Risk Factors
 
 | Factor | Weight | What it detects |
 |--------|--------|-----------------|
-| **Typosquatting** | 30% | Name similarity to top 5,000 PyPI packages |
-| **Package age** | 20% | Recently created packages (< 30 days) |
-| **Maintainer count** | 15% | Single-maintainer packages |
-| **Release pattern** | 15% | Unusual version release cadence |
-| **Metadata quality** | 20% | Missing descriptions, URLs, classifiers |
+| **Typosquatting** | 25% | Name similarity to top 5,000 PyPI packages |
+| **Code patterns** | 25% | Obfuscated exec, credential theft, reverse shells in setup.py |
+| **Package age** | 15% | Recently created packages (< 30 days) |
+| **Metadata quality** | 15% | Missing descriptions, URLs, classifiers |
+| **Maintainer count** | 10% | Single-maintainer packages |
+| **Release pattern** | 10% | Unusual version release cadence |
 
 ## Development
 
@@ -269,7 +272,8 @@ src/alterks/
 ├── models.py            # Core dataclasses (ScanResult, Vulnerability, PolicyAction)
 ├── config.py            # Policy config loader from pyproject.toml
 ├── scanner.py           # Scan orchestrator: environment/requirements scanning
-├── heuristics.py        # Composite risk scorer (typosquatting, age, maintainer…)
+├── heuristics.py        # Composite risk scorer (typosquatting, age, code patterns…)
+├── extractor.py         # Secure package download and extraction for code analysis
 ├── actions.py           # Kill switch logic: block, quarantine, alert
 ├── quarantine.py        # Isolated venv quarantine manager
 ├── cli.py               # CLI commands (scan, install, monitor, quarantine, report)
@@ -277,12 +281,22 @@ src/alterks/
 ├── monitor.py           # Continuous monitoring daemon
 ├── sources/
 │   ├── osv.py           # OSV.dev API client (single + batch queries)
-│   └── pypi.py          # PyPI JSON API client for metadata heuristics
+│   └── pypi.py          # PyPI JSON API client for metadata + download URLs
 └── data/
     └── top_packages.txt # Bundled top-5,000 PyPI package names (typosquatting)
 ```
 
 ## Changelog
+
+### v0.3.0 — Static Code Analysis (Heuristic Expansion)
+
+- **Added**: New `code_patterns` heuristic that downloads and statically analyzes package source code (`setup.py`, `__init__.py`) for known Python supply-chain attack patterns: obfuscated `exec`/`eval`, credential harvesting via `os.environ`, suspicious `subprocess` calls, `ctypes` native loading, and hex-obfuscated payloads.
+- **Added**: Secure package extraction engine (`extractor.py`) with Zip Slip prevention, symlink/device file rejection, decompression bomb protection, and SHA-256 download integrity verification.
+- **Added**: `RiskFactor` model now includes `file_path` and `line_range` fields for precise finding location (backward-compatible — defaults to `None`).
+- **Added**: Pattern ruleset versioning (`CODE_PATTERNS_VERSION = "1.0"`) for audit trail reproducibility.
+- **Fixed**: `Scanner.scan_package()` now integrates `compute_risk()` heuristic scoring. Previously, heuristic risk was only applied during `alterks install` — now `alterks scan`, `alterks report`, and environment scans all benefit from full heuristic analysis.
+- **Fixed**: Configuration weight migration — partial user `heuristic_weights` configs now merge with defaults instead of silently replacing them. New scorers are automatically injected.
+- **Changed**: Default heuristic weights rebalanced to accommodate `code_patterns` (25%). Typosquatting reduced from 30% to 25%; all others proportionally adjusted.
 
 ### v0.2.7 — Test Coverage Reporting in CI
 

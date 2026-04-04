@@ -94,10 +94,9 @@ class TestParseSpec:
 # ---------------------------------------------------------------------------
 
 class TestResolveAndScan:
-    @patch("alterks.pip_hook.compute_risk")
     @patch("alterks.pip_hook.Scanner")
     @patch("alterks.pip_hook.PyPIClient")
-    def test_resolves_latest_version(self, mock_pypi_cls, mock_scanner_cls, mock_risk):
+    def test_resolves_latest_version(self, mock_pypi_cls, mock_scanner_cls):
         mock_meta = MagicMock()
         mock_meta.version = "2.31.0"
         mock_pypi = MagicMock()
@@ -109,8 +108,6 @@ class TestResolveAndScan:
         mock_scanner.scan_package.return_value = scan_result
         mock_scanner_cls.return_value = mock_scanner
 
-        mock_risk.return_value = MagicMock(risk_score=10.0)
-
         result = resolve_and_scan("requests")
 
         assert result is not None
@@ -119,10 +116,9 @@ class TestResolveAndScan:
         mock_pypi.get_metadata.assert_called_once_with("requests")
         mock_scanner.scan_package.assert_called_once_with("requests", "2.31.0")
 
-    @patch("alterks.pip_hook.compute_risk")
     @patch("alterks.pip_hook.Scanner")
     @patch("alterks.pip_hook.PyPIClient")
-    def test_uses_pinned_version(self, mock_pypi_cls, mock_scanner_cls, mock_risk):
+    def test_uses_pinned_version(self, mock_pypi_cls, mock_scanner_cls):
         mock_meta = MagicMock()
         mock_meta.version = "2.31.0"
         mock_pypi = MagicMock()
@@ -133,8 +129,6 @@ class TestResolveAndScan:
         mock_scanner = MagicMock()
         mock_scanner.scan_package.return_value = scan_result
         mock_scanner_cls.return_value = mock_scanner
-
-        mock_risk.return_value = MagicMock(risk_score=0.0)
 
         result = resolve_and_scan("requests==2.30.0")
 
@@ -153,10 +147,9 @@ class TestResolveAndScan:
 
         assert result is None
 
-    @patch("alterks.pip_hook.compute_risk", side_effect=ValueError("oops"))
     @patch("alterks.pip_hook.Scanner")
     @patch("alterks.pip_hook.PyPIClient")
-    def test_heuristic_failure_still_returns(self, mock_pypi_cls, mock_scanner_cls, mock_risk):
+    def test_heuristic_failure_still_returns(self, mock_pypi_cls, mock_scanner_cls):
         mock_meta = MagicMock()
         mock_meta.version = "1.0"
         mock_pypi = MagicMock()
@@ -170,9 +163,8 @@ class TestResolveAndScan:
 
         result = resolve_and_scan("pkg")
 
-        # Should still return even if heuristics fail
+        # Heuristics now run inside Scanner; result should still be returned
         assert result is not None
-        assert result.risk is None
 
 
 # ---------------------------------------------------------------------------

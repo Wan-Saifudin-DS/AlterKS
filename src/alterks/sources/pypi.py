@@ -97,12 +97,24 @@ def _verify_hmac(payload: str, expected: str, key: bytes) -> bool:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class ReleaseFile:
+    """A downloadable file for a specific release version."""
+
+    filename: str
+    url: str
+    sha256: Optional[str] = None
+    size: Optional[int] = None
+    packagetype: str = ""  # "sdist" or "bdist_wheel"
+
+
+@dataclass
 class ReleaseInfo:
     """Metadata for a single release version."""
 
     version: str
     upload_time: Optional[datetime] = None
     yanked: bool = False
+    files: List[ReleaseFile] = field(default_factory=list)
 
 
 @dataclass
@@ -207,6 +219,18 @@ class PyPIClient:
         """
         raw = self._fetch_json(package)
         return _parse_metadata(raw)
+
+    def get_release_files(
+        self, package: str, version: str
+    ) -> List[ReleaseFile]:
+        """Return downloadable files for a specific release version.
+
+        Prefers sdist (.tar.gz) over wheel (.whl) for source inspection.
+        """
+        raw = self._fetch_json(package)
+        releases_raw = raw.get("releases", {})
+        files_raw = releases_raw.get(version, [])
+        return _parse_release_files(files_raw)
 
     # -- Cache ---------------------------------------------------------------
 
@@ -323,6 +347,7 @@ def _parse_metadata(raw: Dict[str, Any]) -> PyPIMetadata:
             version=version,
             upload_time=upload_time,
             yanked=yanked,
+            files=_parse_release_files(files),
         ))
         if upload_time is not None:
             all_upload_times.append(upload_time)
@@ -370,3 +395,22 @@ def _parse_datetime(value: str) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except (ValueError, TypeError):
         return None
+
+
+def _parse_release_files(files: List[Dict[str, Any]]) -> List[ReleaseFile]:
+    """Parse release file entries from the PyPI JSON API."""
+    result: List[ReleaseFile] = []
+    for f in files:
+        filename = f.get("filename", "")
+        url = f.get("url", "")
+        if not filename or not url:
+            continue
+        digests = f.get("digests") or {}
+        result.append(ReleaseFile(
+            filename=filename,
+            url=url,
+            sha256=digests.get("sha256"),
+            size=f.get("size"),
+            packagetype=f.get("packagetype", ""),
+        ))
+    return result

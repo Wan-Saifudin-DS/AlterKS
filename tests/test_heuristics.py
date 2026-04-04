@@ -144,7 +144,9 @@ class TestTyposquatScore:
 
 class TestScorePackageAge:
     def test_very_new_package(self):
-        meta = _make_meta(first_upload=datetime(2026, 3, 28, tzinfo=timezone.utc))
+        from datetime import timedelta
+        recent = datetime.now(timezone.utc) - timedelta(days=2)
+        meta = _make_meta(first_upload=recent)
         score, reason = _score_package_age(meta)
         assert score >= 0.7
         assert "days old" in reason
@@ -204,10 +206,12 @@ class TestScoreReleasePattern:
         assert score >= 0.7
 
     def test_burst_pattern(self):
+        from datetime import timedelta
         releases = [ReleaseInfo(f"{i}.0") for i in range(5)]
+        recent = datetime.now(timezone.utc) - timedelta(days=2)
         meta = _make_meta(
             releases=releases,
-            first_upload=datetime(2026, 3, 28, tzinfo=timezone.utc),
+            first_upload=recent,
         )
         score, reason = _score_release_pattern(meta)
         assert score >= 0.7

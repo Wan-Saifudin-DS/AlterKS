@@ -14,7 +14,6 @@ from typing import List, Optional, Tuple
 from packaging.requirements import InvalidRequirement, Requirement
 
 from alterks.config import AlterKSConfig, load_config
-from alterks.heuristics import compute_risk
 from alterks.models import PackageRisk, PolicyAction, ScanResult, validate_package_name, validate_package_version
 from alterks.scanner import Scanner
 from alterks.sources.pypi import PyPIClient, PyPIError
@@ -56,16 +55,9 @@ def resolve_and_scan(
         version = metadata.version
         logger.info("Resolved %s to version %s", name, version)
 
-    # Vulnerability scan via OSV
+    # Vulnerability scan via OSV (scanner now includes heuristics)
     scanner = Scanner(config=config)
     result = scanner.scan_package(name, version)
-
-    # Heuristic risk assessment
-    try:
-        risk = compute_risk(name, version, metadata, config)
-        result.risk = risk
-    except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
-        logger.warning("Heuristic scoring failed for %s: %s", name, exc)
 
     return result
 
