@@ -62,6 +62,7 @@ def _render_table(results: List[ScanResult], console: Console) -> None:
     table.add_column("Max Severity")
     table.add_column("Risk Score", justify="right")
     table.add_column("Action", justify="center")
+    table.add_column("Findings", max_width=60)
 
     severity_style = {
         Severity.CRITICAL: "bold red",
@@ -79,6 +80,7 @@ def _render_table(results: List[ScanResult], console: Console) -> None:
 
     for r in sorted(results, key=lambda x: x.name):
         sev = r.max_severity
+        findings = _format_findings(r)
         table.add_row(
             r.name,
             r.version,
@@ -86,15 +88,54 @@ def _render_table(results: List[ScanResult], console: Console) -> None:
             f"[{severity_style.get(sev, '')}]{sev.value}[/]",
             f"{r.risk_score:.0f}" if r.risk_score > 0 else "-",
             f"[{action_style.get(r.action, '')}]{r.action.value.upper()}[/]",
+            findings,
         )
 
     console.print(table)
 
 
+def _format_findings(result: ScanResult) -> str:
+    """Format risk factor findings for display in the Rich table.
+
+    Shows code pattern findings with file paths and line numbers.
+    """
+    if not result.risk or not result.risk.risk_factors:
+        return ""
+
+    parts: List[str] = []
+    for factor in result.risk.risk_factors:
+        if factor.score <= 0:
+            continue
+        if factor.file_path and factor.line_range:
+            parts.append(
+                f"[bold]{factor.name}[/bold]: {factor.reason}\n"
+                f"  [dim]{factor.file_path}:{factor.line_range}[/dim]"
+            )
+        elif factor.reason:
+            parts.append(f"[bold]{factor.name}[/bold]: {factor.reason}")
+
+    return "\n".join(parts[:5])  # cap at 5 to avoid table overflow
+
+
 def _render_json(results: List[ScanResult]) -> str:
-    """Serialize scan results to JSON."""
+    """Serialize scan results to JSON.
+
+    Includes ``risk_factors`` with ``file_path`` and ``line_range``
+    for code pattern findings (defaults to ``null`` for metadata-only).
+    """
     data = []
     for r in results:
+        risk_factors = []
+        if r.risk and r.risk.risk_factors:
+            for f in r.risk.risk_factors:
+                risk_factors.append({
+                    "name": f.name,
+                    "score": round(f.score, 4),
+                    "weight": f.weight,
+                    "reason": f.reason,
+                    "file_path": f.file_path,
+                    "line_range": f.line_range,
+                })
         entry = {
             "name": r.name,
             "version": r.version,
@@ -107,6 +148,7 @@ def _render_json(results: List[ScanResult]) -> str:
                 {"id": v.id, "summary": v.summary, "severity": v.severity.value}
                 for v in r.vulnerabilities
             ],
+            "risk_factors": risk_factors,
         }
         data.append(entry)
     return json.dumps(data, indent=2)

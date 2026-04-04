@@ -289,6 +289,13 @@ src/alterks/
 
 ## Changelog
 
+### v0.3.2 — Reporting Enhancement & Quarantine Parity
+
+- **Added**: Rich table now includes a "Findings" column displaying code pattern detections with file paths and line numbers (e.g., `code_patterns: exec/eval with obfuscated input in setup.py:14`).
+- **Added**: JSON report output now includes `risk_factors` array with `file_path` and `line_range` fields for each heuristic factor. Metadata-only factors default to `null`.
+- **Fixed**: `_do_quarantine()` in `actions.py` now actually invokes `QuarantineManager.quarantine_package()` to create an isolated venv, install the package, and record a manifest entry — previously it was a no-op stub that only logged.
+- **Fixed**: Quarantine failure (e.g., disk full, permission denied) no longer crashes the action engine — errors are logged but execution continues gracefully.
+
 ### v0.3.1 — AST Analysis & User Controls
 
 - **Added**: AST-based code analyzer (`ast_analyzer.py`) that walks Python syntax trees to detect suspicious function calls (`exec`, `eval`, `compile`, `__import__`), credential harvesting (`os.environ`), and dangerous module usage (`subprocess`, `ctypes`, `socket`) — while ignoring matches inside comments and string literals, eliminating the primary source of regex false positives.

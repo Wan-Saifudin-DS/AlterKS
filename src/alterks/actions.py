@@ -23,6 +23,7 @@ from typing import Optional, TextIO
 
 from alterks.config import AlterKSConfig
 from alterks.models import PolicyAction, ScanResult
+from alterks.quarantine import QuarantineManager
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ def _do_block(result: ScanResult, stderr: TextIO) -> ActionResult:
 
 
 def _do_quarantine(result: ScanResult, stderr: TextIO) -> ActionResult:
-    """Quarantine a package — defer to quarantine module for venv isolation."""
+    """Quarantine a package — install into an isolated venv via QuarantineManager."""
     msg = (
         f"[AlterKS QUARANTINE] {result.name}=={result.version}: {result.reason}\n"
     )
@@ -184,6 +185,20 @@ def _do_quarantine(result: ScanResult, stderr: TextIO) -> ActionResult:
     stderr.flush()
 
     logger.warning("Quarantining %s==%s: %s", result.name, result.version, result.reason)
+
+    try:
+        qm = QuarantineManager()
+        vuln_ids = [v.id for v in result.vulnerabilities]
+        qm.quarantine_package(
+            result.name,
+            result.version,
+            result.reason,
+            vulnerability_ids=vuln_ids,
+            risk_score=result.risk_score,
+        )
+        logger.info("Package %s==%s quarantined successfully", result.name, result.version)
+    except Exception as exc:
+        logger.error("Quarantine failed for %s==%s: %s", result.name, result.version, exc)
 
     return ActionResult(
         action=PolicyAction.QUARANTINE,

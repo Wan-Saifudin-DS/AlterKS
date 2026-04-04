@@ -182,7 +182,8 @@ class TestDoAlert:
 # ---------------------------------------------------------------------------
 
 class TestDoQuarantine:
-    def test_writes_to_stderr(self):
+    @patch("alterks.actions.QuarantineManager")
+    def test_writes_to_stderr(self, mock_qm_cls):
         r = _result(action=PolicyAction.QUARANTINE, reason="suspect")
         stderr = io.StringIO()
         result = _do_quarantine(r, stderr)
@@ -223,7 +224,8 @@ class TestExecuteAction:
         result = execute_action(r)
         assert result.action == PolicyAction.ALLOW
 
-    def test_quarantine_returns(self):
+    @patch("alterks.actions.QuarantineManager")
+    def test_quarantine_returns(self, mock_qm_cls):
         r = _result(action=PolicyAction.QUARANTINE, reason="suspect")
         result = execute_action(r)
         assert result.action == PolicyAction.QUARANTINE
